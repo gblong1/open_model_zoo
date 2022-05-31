@@ -1,4 +1,0 @@
-﻿  Building Custom Rule D:/open_model_zoo/demos/background_removal_demo/cpp/CMakeLists.txt
-  CMake does not need to re-run because D:/open_model_zoo/demos/background_removal_demo/cpp/CMakeFiles/generate.stamp is up-to-date.
-  main.cpp
-  background_removal_demo.vcxproj -> D:\open_model_zoo\demos\intel64\RelWithDebInfo\background_removal_demo.exe
