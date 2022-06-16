@@ -62,13 +62,13 @@ public:
 
         presenter.drawGraphs(outImg);
 
-        metrics.update(lastRequestStartTime,
+        /*metrics.update(lastRequestStartTime,
                        outImg,
                        cv::Point(textPadding, textSize.height + textPadding),
                        fontType,
                        fontScale,
                        cv::Scalar(255, 100, 100),
-                       thickness);
+                       thickness);*/
 
         if (showAccuracy) {
             cv::putText(outImg,
