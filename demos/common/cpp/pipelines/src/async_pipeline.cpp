@@ -39,8 +39,9 @@ struct MetaData;
 AsyncPipeline::AsyncPipeline(std::unique_ptr<ModelBase>&& modelInstance, const ModelConfig& config, ov::Core& core)
     : model(std::move(modelInstance)) {
     compiledModel = model->compileModel(config, core);
+
     // --------------------------- Create infer requests ------------------------------------------------
-    unsigned int nireq = config.maxAsyncRequests;
+    unsigned int nireq = 1;//config.maxAsyncRequests;
     if (nireq == 0) {
         try {
             // +1 to use it as a buffer of the pipeline
@@ -53,6 +54,7 @@ AsyncPipeline::AsyncPipeline(std::unique_ptr<ModelBase>&& modelInstance, const M
         }
     }
     slog::info << "\tNumber of inference requests: " << nireq << slog::endl;
+
     requestsPool.reset(new RequestsPool(compiledModel, nireq));
     // --------------------------- Call onLoadCompleted to complete initialization of model -------------
     model->onLoadCompleted(requestsPool->getInferRequestsList());
@@ -83,7 +85,6 @@ int64_t AsyncPipeline::submitData(const InputData& inputData, const std::shared_
     if (!request) {
         return -1;
     }
-
     auto startTime = std::chrono::steady_clock::now();
     auto internalModelData = model->preprocess(inputData, request);
     preprocessMetrics.update(startTime);
@@ -103,9 +104,12 @@ int64_t AsyncPipeline::submitData(const InputData& inputData, const std::shared_
                     result.metaData = std::move(metaData);
                     result.internalModelData = std::move(internalModelData);
 
-                    for (const auto& outName : model->getOutputsNames()) {
-                        auto tensor = request.get_tensor(outName);
-                        result.outputsData.emplace(outName, tensor);
+                    for (const auto& output : compiledModel.outputs())
+                    {
+                        for (const auto& outName : output.get_names()) {
+                            auto tensor = request.get_tensor(outName);
+                            result.outputsData.emplace(outName, tensor);
+                        }
                     }
 
                     completedInferenceResults.emplace(frameID, result);

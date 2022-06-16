@@ -46,6 +46,14 @@ public:
     /// @param core - reference to ov::Core instance to use.
     /// If it is omitted, new instance of  ov::Core will be created inside.
     AsyncPipeline(std::unique_ptr<ModelBase>&& modelInstance, const ModelConfig& config, ov::Core& core);
+
+    /// Loads model and performs required initialization - precompiled blob version.
+    /// @param modelInstance pointer to model object. Object it points to should not be destroyed manually after passing
+    /// pointer to this function.
+    /// @param config - fine tuning configuration for model
+    /// @param core - reference to ov::Core instance to use.
+    /// If it is omitted, new instance of  ov::Core will be created inside.
+    AsyncPipeline(const std::string& modelName, const std::string& device, ov::Core& core);
     virtual ~AsyncPipeline();
 
     /// Waits until either output data becomes available or pipeline allows to submit more input data.

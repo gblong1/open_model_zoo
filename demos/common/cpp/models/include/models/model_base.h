@@ -63,9 +63,9 @@ public:
 
 protected:
     virtual void prepareInputsOutputs(std::shared_ptr<ov::Model>& model) = 0;
-
+    virtual void setInputsOutputs(void) = 0;
     std::shared_ptr<ov::Model> prepareModel(ov::Core& core);
-
+    std::string fileExt(const std::string& filename);
     InputTransform inputTransform = InputTransform();
     std::vector<std::string> inputsNames;
     std::vector<std::string> outputsNames;

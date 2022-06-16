@@ -53,7 +53,7 @@ static const char num_threads_message[] = "Optional. Specify count of threads.";
 static const char num_streams_message[] = "Optional. Specify count of streams.";
 static const char num_inf_req_message[] = "Optional. Number of infer requests.";
 static const char image_grid_resolution_message[] = "Optional. Set image grid resolution in format WxH. "
-                                                    "Default value is 1280x720.";
+                                                    "Default value is 1920x1080.";
 static const char ntop_message[] = "Optional. Number of top results. Default value is 5. Must be >= 1.";
 static const char input_resizable_message[] = "Optional. Enables resizable input.";
 static const char no_show_message[] = "Optional. Disable showing of processed images.";
@@ -72,7 +72,7 @@ DEFINE_uint32(nthreads, 0, num_threads_message);
 DEFINE_string(nstreams, "", num_streams_message);
 DEFINE_uint32(nireq, 0, num_inf_req_message);
 DEFINE_uint32(nt, 5, ntop_message);
-DEFINE_string(res, "1280x720", image_grid_resolution_message);
+DEFINE_string(res, "1920x1080", image_grid_resolution_message);
 DEFINE_bool(auto_resize, false, input_resizable_message);
 DEFINE_bool(no_show, false, no_show_message);
 DEFINE_uint32(time, std::numeric_limits<gflags::uint32>::max(), execution_time_message);
@@ -150,6 +150,7 @@ int main(int argc, char* argv[]) {
         std::sort(imageNames.begin(), imageNames.end());
         for (size_t i = 0; i < imageNames.size(); i++) {
             const std::string& name = imageNames[i];
+            slog::info << "reading image " << name << slog::endl;
             auto readingStart = std::chrono::steady_clock::now();
             const cv::Mat& tmpImage = cv::imread(name);
             if (tmpImage.data == nullptr) {
@@ -166,6 +167,8 @@ int main(int argc, char* argv[]) {
                 } else {
                     imageNames[i] = name;
                 }
+                slog::info << "reading image index " << i << " = " << name << slog::endl;
+
             }
         }
 
@@ -218,6 +221,7 @@ int main(int argc, char* argv[]) {
         slog::info << ov::get_openvino_version() << slog::endl;
         ov::Core core;
 
+
         AsyncPipeline pipeline(std::unique_ptr<ModelBase>(
                                    new ClassificationModel(FLAGS_m, FLAGS_nt, FLAGS_auto_resize, labels, FLAGS_layout)),
                                ConfigFactory::getUserConfig(FLAGS_d, FLAGS_nireq, FLAGS_nstreams, FLAGS_nthreads),
@@ -237,7 +241,7 @@ int main(int argc, char* argv[]) {
         bool keepRunning = true;
         std::unique_ptr<ResultBase> result;
         double accuracy = 0;
-        bool isTestMode = true;
+        bool isTestMode = false;
         std::chrono::steady_clock::duration elapsedSeconds = std::chrono::steady_clock::duration(0);
         std::chrono::seconds testDuration = std::chrono::seconds(3);
         std::chrono::seconds fpsCalculationDuration = std::chrono::seconds(1);
@@ -259,7 +263,7 @@ int main(int argc, char* argv[]) {
                                   cv::Size(16, 9),
                                   (framesNum - framesNumOnCalculationStart) /
                                       std::chrono::duration_cast<Sec>(fpsCalculationDuration).count());
-                metrics = PerformanceMetrics();
+                //metrics = PerformanceMetrics();
                 startTime = std::chrono::steady_clock::now();
                 framesNum = 0;
                 correctPredictionsCount = 0;
@@ -268,6 +272,7 @@ int main(int argc, char* argv[]) {
 
             if (pipeline.isReadyToProcess()) {
                 auto imageStartTime = std::chrono::steady_clock::now();
+                //slog::info << "Testing Image number " << nextImageIndex << slog::endl;
 
                 pipeline.submitData(ImageInputData(inputImages[nextImageIndex]),
                                     std::make_shared<ClassificationImageMetaData>(inputImages[nextImageIndex],
@@ -345,20 +350,23 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
+
+            //RDM HACK
+            //keepRunning = false;
         }
 
         if (!FLAGS_gt.empty()) {
             slog::info << "Accuracy (top " << FLAGS_nt << "): " << accuracy << slog::endl;
         }
 
-        slog::info << "Metrics report:" << slog::endl;
-        metrics.logTotal();
-        logLatencyPerStage(readerMetrics.getTotal().latency,
-                           pipeline.getPreprocessMetrics().getTotal().latency,
-                           pipeline.getInferenceMetircs().getTotal().latency,
-                           pipeline.getPostprocessMetrics().getTotal().latency,
-                           renderMetrics.getTotal().latency);
-        slog::info << presenter.reportMeans() << slog::endl;
+        //slog::info << "Metrics report:" << slog::endl;
+        //metrics.logTotal();
+        //logLatencyPerStage(readerMetrics.getTotal().latency,
+        //                   pipeline.getPreprocessMetrics().getTotal().latency,
+        //                   pipeline.getInferenceMetircs().getTotal().latency,
+        //                   pipeline.getPostprocessMetrics().getTotal().latency,
+        //                   renderMetrics.getTotal().latency);
+        //slog::info << presenter.reportMeans() << slog::endl;
     } catch (const std::exception& error) {
         slog::err << error.what() << slog::endl;
         return 1;

@@ -54,4 +54,10 @@ protected:
     std::vector<std::string> labels;
 
     void prepareInputsOutputs(std::shared_ptr<ov::Model>& model) override;
+    void setInputsOutputs(void) override;
+
+private:
+
+    std::unique_ptr<ResultBase> postprocess_no_softmax_topk(InferenceResult& infResult);
+
 };

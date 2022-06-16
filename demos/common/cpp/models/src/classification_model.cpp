@@ -42,7 +42,96 @@ ClassificationModel::ClassificationModel(const std::string& modelFileName,
       nTop(nTop),
       labels(labels) {}
 
+
+/**
+     * @brief Gets the top n results from a tensor
+     *
+     * @param n Top n count
+     * @param input 1D tensor that contains probabilities
+     * @param output Vector of indexes for the top n places
+     */
+template <class T>
+void topResults(unsigned int n, const ov::Tensor& input, std::vector<unsigned>& output) {
+    ov::Shape shape = input.get_shape();
+    size_t input_rank = shape.size();
+    OPENVINO_ASSERT(input_rank != 0 && shape[0] != 0, "Input tensor has incorrect dimensions!");
+    size_t batchSize = shape[0];
+    std::vector<unsigned> indexes(input.get_size() / batchSize);
+
+    n = static_cast<unsigned>(std::min<size_t>((size_t)n, input.get_size()));
+    output.resize(n * batchSize);
+
+    for (size_t i = 0; i < batchSize; i++) {
+        const size_t offset = i * (input.get_size() / batchSize);
+        const T* batchData = input.data<const T>();
+        batchData += offset;
+
+        std::iota(std::begin(indexes), std::end(indexes), 0);
+        std::partial_sort(std::begin(indexes),
+            std::begin(indexes) + n,
+            std::end(indexes),
+            [&batchData](unsigned l, unsigned r) {
+                return batchData[l] > batchData[r];
+            });
+        for (unsigned j = 0; j < n; j++) {
+            output.at(i * n + j) = indexes.at(j);
+        }
+    }
+}
+
+std::unique_ptr<ResultBase> ClassificationModel::postprocess_no_softmax_topk(InferenceResult& infResult) {
+    ClassificationResult* result = new ClassificationResult(infResult.frameId, infResult.metaData);
+    auto retVal = std::unique_ptr<ResultBase>(result);
+    std::map<std::string, ov::Tensor> outputmap = infResult.outputsData;
+    const ov::Tensor& resPtr = infResult.getFirstOutputTensor();
+    ov::element::Type output_type = resPtr.get_element_type();
+
+    const int n = 10;
+    ov::Shape shape = resPtr.get_shape();
+    size_t input_rank = shape.size();
+    size_t batchSize = shape[0];
+    std::vector<unsigned> indexes(resPtr.get_size() / batchSize);
+    std::vector<unsigned> output(n);
+
+#define TENSOR_TOP_RESULT(elem_type)                                                  \
+    case ov::element::Type_t::elem_type: {                                            \
+        using tensor_type = ov::fundamental_type_for<ov::element::Type_t::elem_type>; \
+        topResults<tensor_type>(n, resPtr, output);                                    \
+        break;                                                                        \
+    }
+
+    switch (resPtr.get_element_type()) {
+        TENSOR_TOP_RESULT(f32);
+        TENSOR_TOP_RESULT(f64);
+        TENSOR_TOP_RESULT(f16);
+        TENSOR_TOP_RESULT(i16);
+        TENSOR_TOP_RESULT(u8);
+        TENSOR_TOP_RESULT(i8);
+        TENSOR_TOP_RESULT(u16);
+        TENSOR_TOP_RESULT(i32);
+        TENSOR_TOP_RESULT(u32);
+        TENSOR_TOP_RESULT(i64);
+        TENSOR_TOP_RESULT(u64);
+    default:
+        OPENVINO_ASSERT(false, "cannot locate tensor with element type: ", resPtr.get_element_type());
+    }
+
+    result->topLabels.emplace_back(output[0], labels[output[0]], 0);
+
+    return retVal;
+}
+
 std::unique_ptr<ResultBase> ClassificationModel::postprocess(InferenceResult& infResult) {
+    //'prepareInputOutputs()' may have added softmax & topK output layers. If
+    // this is the case, outputsNames.size() will be 2.
+    // When we use pre-compiled models, or when we disable softmax & topK layers,
+    // we use a different post-proc method, 'postprocess_no_softmax_topk'
+    if (outputsNames.size() != 2)
+    {
+        return postprocess_no_softmax_topk(infResult);
+    }
+
+    //begin post proc method that assumes softmax & topK outputs
     const ov::Tensor& indicesTensor = infResult.outputsData.find(outputsNames[0])->second;
     const int* indicesPtr = indicesTensor.data<int>();
     const ov::Tensor& scoresTensor = infResult.outputsData.find(outputsNames[1])->second;
@@ -59,6 +148,7 @@ std::unique_ptr<ResultBase> ClassificationModel::postprocess(InferenceResult& in
         }
         result->topLabels.emplace_back(ind, labels[ind], scoresPtr[i]);
     }
+   
 
     return retVal;
 }
@@ -157,7 +247,9 @@ void ClassificationModel::prepareInputsOutputs(std::shared_ptr<ov::Model>& model
     ppp.output().tensor().set_element_type(ov::element::f32);
     model = ppp.build();
 
+#if 0
     // --------------------------- Adding softmax and topK output  ---------------------------
+
     auto nodes = model->get_ops();
     auto softmaxNodeIt = std::find_if(std::begin(nodes), std::end(nodes), [](const std::shared_ptr<ov::Node>& op) {
         return std::string(op->get_type_name()) == "Softmax";
@@ -193,4 +285,61 @@ void ClassificationModel::prepareInputsOutputs(std::shared_ptr<ov::Model>& model
     ppp.output("indices").tensor().set_element_type(ov::element::i32);
     ppp.output("scores").tensor().set_element_type(ov::element::f32);
     model = ppp.build();
+#endif
+}
+
+void ClassificationModel::setInputsOutputs(void) {
+    const auto& input = compiledModel.input();
+    inputsNames.push_back(input.get_any_name());
+ 
+    const ov::Shape& inputShape = input.get_shape();
+    const ov::Layout& inputLayout = getLayoutFromShape(inputShape);
+
+    ov::element::Type inputType = input.get_element_type();
+
+    if (inputShape.size() != 4 || inputShape[ov::layout::channels_idx(inputLayout)] != 3) {
+        throw std::logic_error("3-channel 4-dimensional model's input is expected");
+    }
+
+    const auto width = inputShape[ov::layout::width_idx(inputLayout)];
+    const auto height = inputShape[ov::layout::height_idx(inputLayout)];
+    if (height != width) {
+        throw std::logic_error("Model input has incorrect image shape. Must be NxN square."
+            " Got " +
+            std::to_string(height) + "x" + std::to_string(width) + ".");
+    }
+
+    if (config.deviceName == "VPUX")
+        compiledModel.input().get_tensor().set_partial_shape({ 1,height,width,3 });
+
+    const ov::Shape& outputShape = compiledModel.output().get_shape();
+    ov::element::Type outputType = compiledModel.output().get_element_type();
+
+    const ov::Layout& outputLayout = getLayoutFromShape(outputShape);
+
+    if (outputShape.size() == 4 && (outputShape[ov::layout::height_idx(outputLayout)] != 1 ||
+        outputShape[ov::layout::width_idx(outputLayout)] != 1)) {
+        throw std::logic_error("Classification model wrapper supports topologies only"
+            " with 4-dimensional output which has last two dimensions of size 1");
+    }
+
+    size_t classesNum = outputShape[ov::layout::channels_idx(outputLayout)];
+    if (nTop > classesNum) {
+        throw std::logic_error("The model provides " + std::to_string(classesNum) + " classes, but " +
+            std::to_string(nTop) + " labels are requested to be predicted");
+    }
+    if (classesNum == labels.size() + 1) {
+        labels.insert(labels.begin(), "other");
+        slog::warn << "Inserted 'other' label as first." << slog::endl;
+    }
+    else if (classesNum != labels.size()) {
+        throw std::logic_error("Model's number of classes and parsed labels must match (" +
+            std::to_string(outputShape[1]) + " and " + std::to_string(labels.size()) + ')');
+    }
+
+    slog::info << "\t\tcompiled model input type: " << inputType << slog::endl;
+    slog::info << "\t\tcompiled model input shape: " << inputShape << slog::endl;
+    slog::info << "\t\tcompiled model output type: " << outputType << slog::endl;
+    slog::info << "\t\tcompiled model output shape: " << outputShape << slog::endl;
+
 }
