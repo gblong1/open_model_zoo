@@ -7,7 +7,7 @@ message("obs background removal")
 file(GLOB SRC_FILES ./*.cpp)
 file(GLOB H_FILES ./*.h)
 
-add_obs_plugin(NAME obs_background_removal_ov
+add_obs_plugin(NAME obs-backgroundremoval-ov
     SOURCES ${SRC_FILES}
     HEADERS ${H_FILES}
     DEPENDENCIES monitors models pipelines)

@@ -25,14 +25,16 @@ OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 
 MODULE_EXPORT const char *obs_module_description(void)
 {
-	return "Background Removal plugin powered by OpenVINO";
+	return "Portrait background filter plugin";
 }
 
-extern struct obs_source_info ov_background_removal_filter_info;
+//extern struct obs_source_info background_removal_filter_info;
+extern struct obs_source_info background_removal_filter_info_ov;
 
 bool obs_module_load(void)
 {
-    obs_register_source(&ov_background_removal_filter_info);
+   // obs_register_source(&background_removal_filter_info);
+    obs_register_source(&background_removal_filter_info_ov);
     blog(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
     return true;
 }

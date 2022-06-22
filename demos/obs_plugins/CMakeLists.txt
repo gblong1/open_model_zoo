@@ -93,7 +93,7 @@ macro(add_obs_plugin)
 	if(WIN32)
 	    # Enable Multicore Builds and disable FH4 (to not depend on VCRUNTIME140_1.DLL when building with VS2019)
         if (MSVC)
-            add_definitions(/MP /d2FH4- /std:c++latest /MT)
+            add_definitions(/MP /d2FH4- /std:c++latest)
         endif()
 		
 		# The following adds OSB_FRONTEND includes / library links... doesn't seem required (at least right now)
