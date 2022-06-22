@@ -18,6 +18,7 @@ project(Demos)
 option(ENABLE_PYTHON "Whether to build extension modules for Python demos" OFF)
 option(MULTICHANNEL_DEMO_USE_TBB "Use TBB-based threading in multichannel demos" OFF)
 option(MULTICHANNEL_DEMO_USE_NATIVE_CAM "Use native camera api in multichannel demos" OFF)
+option(ENABLE_OBS_PLUGINS "Whether to build OBS (Open Broadcaster Software) plugins" ON)
 
 if(NOT BIN_FOLDER)
     string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} ARCH)
@@ -148,7 +149,7 @@ add_subdirectory(multi_channel_common/cpp)
 # collect all samples subdirectories
 file(GLOB samples_dirs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} *)
 # skip building of unnecessary subdirectories
-list(REMOVE_ITEM samples_dirs common thirdparty multi_channel_common)
+list(REMOVE_ITEM samples_dirs common thirdparty multi_channel_common obs_plugins)
 add_demos_to_build(${samples_dirs})
 
 if(ENABLE_PYTHON)
@@ -167,4 +168,8 @@ if(ENABLE_PYTHON)
     add_subdirectory(human_pose_estimation_3d_demo/python/pose_extractor)
     add_subdirectory(common/python/monitors_extension)
     add_subdirectory(speech_recognition_deepspeech_demo/python/ctcdecode-numpy)
+endif()
+
+if(ENABLE_OBS_PLUGINS)
+    add_subdirectory(obs_plugins)
 endif()
