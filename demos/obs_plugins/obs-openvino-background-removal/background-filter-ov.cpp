@@ -34,9 +34,6 @@
 //const char* MODEL_RVM = "rvm_mobilenetv3_fp32.onnx";
 const char* MODEL_DEEPLABV3 = "deeplabv3.xml";
 
-//const char* USEGPU_CPU = "cpu";
-//const char* USEGPU_DML = "dml";
-//const char* USEGPU_CUDA = "cuda";
 const char* DEVICE_CPU = "CPU";
 const char* DEVICE_VPU = "VPU";
 const char* DEVICE_GPU = "GPU";
@@ -46,17 +43,7 @@ const std::string modelFilepathS = "D:\\open_model_zoo\\models\\public\\deeplabv
 //AsyncPipeline pipeline;
 
 struct background_removal_filter {
-	//std::unique_ptr<Ort::Session> session;
-	//std::unique_ptr<Ort::Env> env;
-	std::vector<const char*> inputNames;
-	std::vector<const char*> outputNames;
-	//std::vector<Ort::Value> inputTensor;
-	//std::vector<Ort::Value> outputTensor;
-	std::vector<std::vector<int64_t> > inputDims;
-	std::vector<std::vector<int64_t> > outputDims;
-	std::vector<std::vector<float> > outputTensorValues;
-	std::vector<std::vector<float> > inputTensorValues;
-	//Ort::MemoryInfo memoryInfo;
+	
 	float threshold = 0.5f;
 	cv::Scalar backgroundColor{ 0, 0, 0 };
 	float contourFilter = 0.05f;
@@ -66,11 +53,11 @@ struct background_removal_filter {
 	std::string modelSelection;
 
 	// Use the media-io converter to both scale and convert the colorspace
-	video_scaler_t* scalerToBGR;
-	video_scaler_t* scalerFromBGR;
-	std::uint32_t nireq;
+	video_scaler_t* scalerToBGR = nullptr;
+	video_scaler_t* scalerFromBGR = nullptr;
+	std::uint32_t nireq = 0;
 	std::uint32_t nthreads = 0;
-	std::string nstreams;
+	std::string nstreams = "";
 	std::string layout = "";
 	bool auto_resize = false;
 
@@ -78,11 +65,10 @@ struct background_removal_filter {
 	int maskEveryXFrames = 1;
 	int maskEveryXFramesCount = 0;
 
-
+    std::shared_ptr<AsyncPipeline> pipeline;
+  
 #if _WIN32
 	const wchar_t* modelFilepath = nullptr;
-	
-
 #else
 	const char* modelFilepath = nullptr;
 #endif
@@ -92,7 +78,7 @@ struct background_removal_filter {
 static const char* filter_getname(void* unused)
 {
 	UNUSED_PARAMETER(unused);
-	return "Background Removal OV";
+	return "OpenVINO Background Removal";
 }
 
 
@@ -139,16 +125,16 @@ static obs_properties_t* filter_properties(void* data)
 		"replaceColor",
 		obs_module_text("Background Color"));
 
-	obs_property_t* p_use_gpu = obs_properties_add_list(
+	obs_property_t* p_inf_device = obs_properties_add_list(
 		props,
 		"Device",
 		obs_module_text("Inference device"),
 		OBS_COMBO_TYPE_LIST,
 		OBS_COMBO_FORMAT_STRING);
 
-	obs_property_list_add_string(p_use_gpu, obs_module_text("CPU"), DEVICE_CPU);
-	obs_property_list_add_string(p_use_gpu, obs_module_text("GPU"), DEVICE_GPU);
-	obs_property_list_add_string(p_use_gpu, obs_module_text("VPU"), DEVICE_GPU);
+	obs_property_list_add_string(p_inf_device, obs_module_text("CPU"), DEVICE_CPU);
+	obs_property_list_add_string(p_inf_device, obs_module_text("GPU"), DEVICE_GPU);
+	obs_property_list_add_string(p_inf_device, obs_module_text("VPU"), DEVICE_VPU);
 
 
 	obs_property_t* p_model_select = obs_properties_add_list(
@@ -189,103 +175,6 @@ static void filter_defaults(obs_data_t* settings) {
 
 }
 
-//static void createOVSession(struct background_removal_filter* tf) {
-//
-//	ov::Core core;
-//	AsyncPipeline pipeline(
-//		std::unique_ptr<SegmentationModel>(new SegmentationModel(tf->modelFilepathS, tf->auto_resize, tf->layout)),
-//		ConfigFactory::getUserConfig(tf->Device, tf->nireq, tf->nstreams, tf->nthreads),
-//		core);
-//
-//
-//}
-
-//static void createOrtSession(struct background_removal_filter* tf) {
-//
-//	Ort::SessionOptions sessionOptions;
-//
-//	sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-//	if (tf->Device != USEGPU_CPU) {
-//		sessionOptions.DisableMemPattern();
-//		sessionOptions.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-//	}
-//
-//	char* modelFilepath_rawPtr = obs_module_file(tf->modelSelection.c_str());
-//
-//	if (modelFilepath_rawPtr == nullptr) {
-//		blog(LOG_ERROR, "Unable to get model filename %s from plugin.", tf->modelSelection.c_str());
-//		return;
-//	}
-//
-//	std::string modelFilepath_s(modelFilepath_rawPtr);
-//	bfree(modelFilepath_rawPtr);
-//
-//#if _WIN32
-//	std::wstring modelFilepath_ws(modelFilepath_s.size(), L' ');
-//	std::copy(modelFilepath_s.begin(), modelFilepath_s.end(), modelFilepath_ws.begin());
-//	tf->modelFilepath = modelFilepath_ws.c_str();
-//#else
-//	tf->modelFilepath = modelFilepath_s.c_str();
-//#endif
-//
-//	try {
-//#if _WIN32
-//#ifdef WITH_CUDA
-//		Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CUDA(sessionOptions, 0));
-//#else
-//		Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_DML(sessionOptions, 0));
-//#endif
-//#endif
-//		tf->session.reset(new Ort::Session(*tf->env, tf->modelFilepath, sessionOptions));
-//	}
-//	catch (const std::exception& e) {
-//		blog(LOG_ERROR, "%s", e.what());
-//		return;
-//	}
-//
-//	Ort::AllocatorWithDefaultOptions allocator;
-//
-//	tf->model->populateInputOutputNames(tf->session, tf->inputNames, tf->outputNames);
-//
-//	if (!tf->model->populateInputOutputShapes(tf->session, tf->inputDims, tf->outputDims)) {
-//		blog(LOG_ERROR, "Unable to get model input and output shapes");
-//		return;
-//	}
-//
-//	for (size_t i = 0; i < tf->inputNames.size(); i++) {
-//		blog(LOG_INFO, "Model %s input %d: name %s shape (%d dim) %d x %d x %d x %d",
-//			tf->modelSelection.c_str(), (int)i,
-//			tf->inputNames[i],
-//			(int)tf->inputDims[i].size(),
-//			(int)tf->inputDims[i][0],
-//			((int)tf->inputDims[i].size() > 1) ? (int)tf->inputDims[i][1] : 0,
-//			((int)tf->inputDims[i].size() > 2) ? (int)tf->inputDims[i][2] : 0,
-//			((int)tf->inputDims[i].size() > 3) ? (int)tf->inputDims[i][3] : 0
-//		);
-//	}
-//	for (size_t i = 0; i < tf->outputNames.size(); i++) {
-//		blog(LOG_INFO, "Model %s output %d: name %s shape (%d dim) %d x %d x %d x %d",
-//			tf->modelSelection.c_str(), (int)i,
-//			tf->outputNames[i],
-//			(int)tf->outputDims[i].size(),
-//			(int)tf->outputDims[i][0],
-//			((int)tf->outputDims[i].size() > 1) ? (int)tf->outputDims[i][1] : 0,
-//			((int)tf->outputDims[i].size() > 2) ? (int)tf->outputDims[i][2] : 0,
-//			((int)tf->outputDims[i].size() > 3) ? (int)tf->outputDims[i][3] : 0);
-//	}
-//
-//	// Allocate buffers
-//	tf->model->allocateTensorBuffers(
-//		tf->inputDims,
-//		tf->outputDims,
-//		tf->outputTensorValues,
-//		tf->inputTensorValues,
-//		tf->inputTensor,
-//		tf->outputTensor
-//	);
-//}
-
-
 static void destroyScalers(struct background_removal_filter* tf) {
 	blog(LOG_INFO, "Destroy scalers.");
 	if (tf->scalerToBGR != nullptr) {
@@ -316,16 +205,15 @@ static void filter_update(void* data, obs_data_t* settings)
 	tf->maskEveryXFramesCount = (int)(0);
 
 
-	const std::string newUseGpu = obs_data_get_string(settings, "Device");
+	const std::string current_device = obs_data_get_string(settings, "Device");
 	const std::string newModel = obs_data_get_string(settings, "model_select");
 
 	if (tf->modelSelection.empty() ||
-		tf->modelSelection != newModel ||
-		tf->Device != newUseGpu)
+		tf->modelSelection != newModel)
 	{
 		// Re-initialize model if it's not already the selected one or switching inference device
 		tf->modelSelection = newModel;
-		tf->Device = newUseGpu;
+		//tf->Device = newUseGpu;
 		destroyScalers(tf);
 
 		//if (tf->modelSelection == MODEL_SINET) {
@@ -343,11 +231,16 @@ static void filter_update(void* data, obs_data_t* settings)
 		//if (tf->modelSelection == MODEL_RVM) {
 		//	tf->model.reset(new ModelRVM);
 		//}
-
-
-
-	
 	}
+
+    if (!tf->pipeline || (tf->Device != current_device))
+    {
+        tf->Device = current_device;
+        blog(LOG_INFO, "updating pipeline to use %s", tf->Device.c_str());
+        tf->pipeline = std::make_shared<AsyncPipeline>(std::unique_ptr<SegmentationModel>(new SegmentationModel(modelFilepathS, false, "")),
+            ConfigFactory::getUserConfig(tf->Device, 1, "", 0),
+            core);
+    }
 }
 
 
@@ -355,7 +248,7 @@ static void filter_update(void* data, obs_data_t* settings)
 
 static void* filter_create(obs_data_t* settings, obs_source_t* source)
 {
-	struct background_removal_filter* tf = reinterpret_cast<background_removal_filter*>(bzalloc(sizeof(struct background_removal_filter)));
+    background_removal_filter* tf = new background_removal_filter;// reinterpret_cast<background_removal_filter*>(bzalloc(sizeof(struct background_removal_filter)));
 
 
 	std::string instanceName{ "background-removal-inference-ov" };
@@ -421,7 +314,6 @@ static cv::Mat convertFrameToBGR(
 	return imageBGR;
 }
 
-
 static void convertBGRToFrame(
 	const cv::Mat& imageBGR,
 	struct obs_source_frame* frame,
@@ -438,10 +330,6 @@ static void convertBGRToFrame(
 		&(imageBGR.data), &(rgbLinesize));
 }
 
-
-
-
-
 static void processImageForBackground(
 	struct background_removal_filter* tf,
 	const cv::Mat& imageBGR,
@@ -449,27 +337,18 @@ static void processImageForBackground(
 {   
 	//blog(LOG_INFO,"OpenVino version", ov::get_openvino_version());
 
-	blog(LOG_INFO, "I AM HERE IN PROCESS %s ", modelFilepathS.c_str());
 	std::unique_ptr<ResultBase> result;
 
-	AsyncPipeline pipeline(std::unique_ptr<SegmentationModel>(new SegmentationModel(modelFilepathS, false, "")),
-		ConfigFactory::getUserConfig("CPU", 0, "", 0),
-		core);
+    auto pipeline = tf->pipeline;
 
-	blog(LOG_INFO, "After async pipeline");
-	//if (tf->session.get() == nullptr) {
-	//	// Onnx runtime session is not initialized. Problem in initialization
-	//	return;
-	//}
 	try {
 		// To RGB
 		cv::Mat imageRGB;
 		cv::cvtColor(imageBGR, imageRGB, cv::COLOR_BGR2RGB);
-		if (pipeline.isReadyToProcess()) {
+		if (pipeline->isReadyToProcess()) {
 			auto startTime = std::chrono::steady_clock::now();
 
-			blog(LOG_INFO, "before submit data");
-			pipeline.submitData(ImageInputData(imageRGB),
+            pipeline->submitData(ImageInputData(imageRGB),
 				std::make_shared<ImageMetaData>(imageRGB, startTime));
 
 	}
@@ -477,34 +356,10 @@ static void processImageForBackground(
 			blog(LOG_INFO, "Pipeline not ready");
 		}
 
-		blog(LOG_INFO, "After submit data");
 		//pipeline.waitForData();
 
-		
-
-		// Resize to network input size
-		//uint32_t inputWidth, inputHeight;
-		//tf->model->getNetworkInputSize(tf->inputDims, inputWidth, inputHeight);
-
-		//cv::Mat resizedImageRGB;
-		//cv::resize(imageRGB, resizedImageRGB, cv::Size(inputWidth, inputHeight));
-
-		// Prepare input to nework
-		//cv::Mat resizedImage, preprocessedImage;
-		//resizedImageRGB.convertTo(resizedImage, CV_32F);
-
-		//tf->model->prepareInputToNetwork(resizedImage, preprocessedImage);
-
-		//tf->model->loadInputToTensor(preprocessedImage, inputWidth, inputHeight, tf->inputTensorValues);
-
-		// Run network inference
-		//tf->model->runNetworkInference(tf->session, tf->inputNames, tf->outputNames, tf->inputTensor, tf->outputTensor);
-
-		// Get output
-		// Map network output mask to cv::Mat
-		//cv::Mat outputImage = tf->model->getNetworkOutput(tf->outputDims, tf->outputTensorValues, tf->inputDims, tf->inputTensorValues);
-		pipeline.waitForTotalCompletion();
-		result = pipeline.getResult();
+        pipeline->waitForTotalCompletion();
+		result = pipeline->getResult();
 		if (!result) {
 			blog(LOG_INFO, "is it valid result?");
 			backgroundMask = cv::Mat::zeros(imageBGR.size(), CV_8UC1);
@@ -512,21 +367,10 @@ static void processImageForBackground(
 
 		}
 
-		blog(LOG_INFO, "After get result");
 		cv::Mat outputImage = result->asRef<ImageResult>().resultImage;
 
-		blog(LOG_INFO, "After mask into output image");
-
-		// Post-process output
-		//tf->model->postprocessOutput(outputImage);
-
-		blog(LOG_INFO, "After post process output");
-
-	
 		backgroundMask = outputImage < tf->threshold;
 	
-		blog(LOG_INFO, "After backgroundMask");
-
 		// Contour processing
 		if (tf->contourFilter > 0.0 && tf->contourFilter < 1.0) {
 			std::vector<std::vector<cv::Point> > contours;
@@ -542,12 +386,8 @@ static void processImageForBackground(
 			drawContours(backgroundMask, filteredContours, -1, cv::Scalar(255), -1);
 		}
 
-		blog(LOG_INFO, "After contourFilter");
-
 		// Resize the size of the mask back to the size of the original input.
 		cv::resize(backgroundMask, backgroundMask, imageBGR.size());
-
-		blog(LOG_INFO, "After resize");
 
 		// Smooth mask with a fast filter (box).
 		if (tf->smoothContour > 0.0) {
@@ -555,7 +395,6 @@ static void processImageForBackground(
 			cv::boxFilter(backgroundMask, backgroundMask, backgroundMask.depth(), cv::Size(k_size, k_size));
 			backgroundMask = backgroundMask > 128;
 		}
-		blog(LOG_INFO, "After smoothContour");
 	}
 
 	
@@ -569,7 +408,6 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 {
 	struct background_removal_filter* tf = reinterpret_cast<background_removal_filter*>(data);
 
-	
 	// Convert to BGR
 	cv::Mat imageBGR = convertFrameToBGR(frame, tf);
 
@@ -637,7 +475,8 @@ static void filter_destroy(void* data)
 
 	if (tf) {
 		destroyScalers(tf);
-		bfree(tf);
+		//bfree(tf);
+        delete tf;
 	}
 }
 
