@@ -46,6 +46,8 @@ struct background_removal_filter {
 	
 	float threshold = 0.5f;
 	cv::Scalar backgroundColor{ 0, 0, 0 };
+    int blur_value;
+    bool blur;
 	float contourFilter = 0.05f;
 	float smoothContour = 0.5f;
 	float feather = 0.0f;
@@ -88,13 +90,6 @@ static obs_properties_t* filter_properties(void* data)
 {
 	obs_properties_t* props = obs_properties_create();
 
-	obs_property_t* p_threshold = obs_properties_add_float_slider(
-		props,
-		"threshold",
-		obs_module_text("Threshold"),
-		0.0,
-		1.0,
-		0.025);
 
 	obs_property_t* p_contour_filter = obs_properties_add_float_slider(
 		props,
@@ -125,6 +120,21 @@ static obs_properties_t* filter_properties(void* data)
 		"replaceColor",
 		obs_module_text("Background Color"));
 
+    obs_property_t* p_blur = obs_properties_add_bool(
+        props,
+        "blur_background",
+        obs_module_text("Background Blur"));
+
+    obs_property_t* p_blur_value = obs_properties_add_int(
+        props,
+        "blur_background_value",
+        obs_module_text("Background Blur Intensity"),
+        5,
+        41,
+        2);
+
+
+
 	obs_property_t* p_inf_device = obs_properties_add_list(
 		props,
 		"Device",
@@ -144,11 +154,7 @@ static obs_properties_t* filter_properties(void* data)
 		OBS_COMBO_TYPE_LIST,
 		OBS_COMBO_FORMAT_STRING);
 
-	//obs_property_list_add_string(p_model_select, obs_module_text("SINet"), MODEL_SINET);
-	//obs_property_list_add_string(p_model_select, obs_module_text("MODNet"), MODEL_MODNET);
-	//obs_property_list_add_string(p_model_select, obs_module_text("MediaPipe"), MODEL_MEDIAPIPE);
-	//obs_property_list_add_string(p_model_select, obs_module_text("Selfie Segmentation"), MODEL_SELFIE);
-	//obs_property_list_add_string(p_model_select, obs_module_text("Robust Video Matting"), MODEL_RVM);
+
 	obs_property_list_add_string(p_model_select, obs_module_text("Deeplabv3"), MODEL_DEEPLABV3);
 
 	obs_property_t* p_mask_every_x_frames = obs_properties_add_int(
@@ -164,11 +170,12 @@ static obs_properties_t* filter_properties(void* data)
 }
 
 static void filter_defaults(obs_data_t* settings) {
-	obs_data_set_default_double(settings, "threshold", 0.5);
 	obs_data_set_default_double(settings, "contour_filter", 0.05);
 	obs_data_set_default_double(settings, "smooth_contour", 0.5);
 	obs_data_set_default_double(settings, "feather", 0.0);
 	obs_data_set_default_int(settings, "replaceColor", 0x000000);
+    obs_data_set_default_bool(settings, "blur_background", false);
+    obs_data_set_default_int(settings, "blur_background_value", 21);
 	obs_data_set_default_string(settings, "Device", DEVICE_CPU);
 	obs_data_set_default_string(settings, "model_select", MODEL_DEEPLABV3);
 	obs_data_set_default_int(settings, "mask_every_x_frames", 1);
@@ -191,12 +198,15 @@ static void destroyScalers(struct background_removal_filter* tf) {
 static void filter_update(void* data, obs_data_t* settings)
 {
 	struct background_removal_filter* tf = reinterpret_cast<background_removal_filter*>(data);
-	tf->threshold = (float)obs_data_get_double(settings, "threshold");
 
 	uint64_t color = obs_data_get_int(settings, "replaceColor");
 	tf->backgroundColor.val[0] = (double)((color >> 16) & 0x0000ff);
 	tf->backgroundColor.val[1] = (double)((color >> 8) & 0x0000ff);
 	tf->backgroundColor.val[2] = (double)(color & 0x0000ff);
+
+
+    tf->blur = obs_data_get_bool(settings, "blur_background");
+    tf->blur_value = (int)obs_data_get_int(settings, "blur_background_value");
 
 	tf->contourFilter = (float)obs_data_get_double(settings, "contour_filter");
 	tf->smoothContour = (float)obs_data_get_double(settings, "smooth_contour");
@@ -216,21 +226,7 @@ static void filter_update(void* data, obs_data_t* settings)
 		//tf->Device = newUseGpu;
 		destroyScalers(tf);
 
-		//if (tf->modelSelection == MODEL_SINET) {
-		//	tf->model.reset(new ModelSINET);
-		//}
-		//if (tf->modelSelection == MODEL_MODNET) {
-		//	tf->model.reset(new ModelMODNET);
-		//}
-		//if (tf->modelSelection == MODEL_SELFIE) {
-		//	tf->model.reset(new ModelSelfie);
-		//}
-		//if (tf->modelSelection == MODEL_MEDIAPIPE) {
-		//	tf->model.reset(new ModelMediaPipe);
-		//}
-		//if (tf->modelSelection == MODEL_RVM) {
-		//	tf->model.reset(new ModelRVM);
-		//}
+
 	}
 
     if (!tf->pipeline || (tf->Device != current_device))
@@ -330,6 +326,8 @@ static void convertBGRToFrame(
 		&(imageBGR.data), &(rgbLinesize));
 }
 
+
+
 static void processImageForBackground(
 	struct background_removal_filter* tf,
 	const cv::Mat& imageBGR,
@@ -369,7 +367,10 @@ static void processImageForBackground(
 
 		cv::Mat outputImage = result->asRef<ImageResult>().resultImage;
 
-		backgroundMask = outputImage < tf->threshold;
+
+        backgroundMask = outputImage != 15 ; 
+
+
 	
 		// Contour processing
 		if (tf->contourFilter > 0.0 && tf->contourFilter < 1.0) {
@@ -404,12 +405,15 @@ static void processImageForBackground(
 }
 
 
+
 static struct obs_source_frame* filter_render(void* data, struct obs_source_frame* frame)
 {
 	struct background_removal_filter* tf = reinterpret_cast<background_removal_filter*>(data);
 
 	// Convert to BGR
 	cv::Mat imageBGR = convertFrameToBGR(frame, tf);
+
+   
 
 	cv::Mat backgroundMask(imageBGR.size(), CV_8UC1, cv::Scalar(255));
 
@@ -422,15 +426,18 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 	else {
 		// Process the image to find the mask.
 		processImageForBackground(tf, imageBGR, backgroundMask);
+  
 
 		// Now that the mask is completed, save it off so it can be used on a later frame
 		// if we've chosen to only process the mask every X frames.
 		backgroundMask.copyTo(tf->backgroundMask);
-	}
+        
 
+	}
+    cv::Mat alpha_im;
 	// Apply the mask back to the main image.
 	try {
-		if (tf->feather > 0.0) {
+		if ((tf->feather > 0.0) && (!tf->blur)) {
 			// If we're going to feather/alpha blend, we need to do some processing that
 			// will combine the blended "foreground" and "masked background" images onto the main image.
 			cv::Mat maskFloat;
@@ -448,14 +455,33 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 			// Mutiply the unmasked foreground area of the image with ( 1 - alpha matte).
 			cv::multiply(imageBGR, cv::Scalar(1, 1, 1) - maskFloat3c, tmpImage, 1.0, CV_32FC3);
 			// Multiply the masked background area (with the background color applied) with the alpha matte.
+
+
 			cv::multiply(cv::Mat(imageBGR.size(), CV_32FC3, tf->backgroundColor), maskFloat3c, tmpBackground);
 			// Add the foreground and background images together, rescale back to an 8bit integer image
 			// and apply onto the main image.
 			cv::Mat(tmpImage + tmpBackground).convertTo(imageBGR, CV_8UC3);
 		}
 		else {
-			// If we're not feathering/alpha blending, we can
-			// apply the mask as-is back onto the main image.
+		
+            if (tf->blur) {
+                cv::Mat bg;
+                blur(imageBGR, bg, cv::Size(tf->blur_value, tf->blur_value));
+                for (int row = 0; row < backgroundMask.rows; ++row)
+                {
+                    for (int col = 0; col < backgroundMask.cols; ++col) {
+
+                           if (backgroundMask.at<uchar>(row, col)){
+                           
+                               imageBGR.at<cv::Vec3b>(row, col) = bg.at<cv::Vec3b>(row, col);
+                            
+                        }
+
+                    }
+                }
+                
+            }
+            else
 			imageBGR.setTo(tf->backgroundColor, backgroundMask);
 		}
 	}
@@ -464,6 +490,9 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 	}
 
 	// Put masked image back on frame,
+
+ 
+
 	convertBGRToFrame(imageBGR, frame, tf);
 	return frame;
 }

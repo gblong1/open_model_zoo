@@ -207,12 +207,15 @@ cv::Mat Foreground(const ImageResult& result, OutputTransform& outputTransform) 
 
     cv::Mat Mask = result.resultImage;
     cv::Mat background = cv::Mat::zeros(Mask.size(), CV_8UC1);
+    //cv::Mat background;
+    //GaussianBlur(inputImg, background, cv::Size(9, 9), 1.0);
     cv::Mat bin_mask = cv::Mat::zeros(Mask.size(), CV_8UC1);
     for (int row = 0; row < Mask.rows; ++row)
     {
         for (int col = 0; col < Mask.cols; ++col) {
-            if (Mask.at<uchar>(row, col))
+            if ((Mask.at<uchar>(row, col)) &&  ((int)(Mask.at<uchar>(row, col) == 15)))
             {
+                
                 bin_mask.at<uchar>(row, col) = 255;
             }
             else
@@ -240,7 +243,9 @@ cv::Mat Foreground(const ImageResult& result, OutputTransform& outputTransform) 
   
 
     //create a transparent background
-    cv::Mat bg = cv::Mat::zeros(alpha_im.size(), CV_8UC4); 
+    //cv::Mat bg = cv::Mat::zeros(alpha_im.size(), CV_8UC4);
+    cv::Mat bg;
+    blur(alpha_im, bg , cv::Size(21, 21));
     //setup the new mask
     cv::Mat new_mask;
     cv::Mat allmask[4] = { bin_mask, bin_mask, bin_mask, bin_mask };
