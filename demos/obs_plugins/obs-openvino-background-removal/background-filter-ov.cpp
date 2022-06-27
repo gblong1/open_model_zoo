@@ -39,18 +39,20 @@ const char* DEVICE_VPU = "VPU";
 const char* DEVICE_GPU = "GPU";
 
 ov::Core core;
-const std::string modelFilepathS = "D:\\open_model_zoo\\models\\public\\deeplabv3\\FP16\\deeplabv3.xml";
-//AsyncPipeline pipeline;
+//const std::string modelFilepath = "D:\\open_model_zoo\\models\\public\\deeplabv3\\FP16\\deeplabv3.xml";
+
 
 struct background_removal_filter {
 	
-	float threshold = 0.5f;
+    std::string modelFilepath;
 	cv::Scalar backgroundColor{ 0, 0, 0 };
     int blur_value;
     bool blur;
 	float contourFilter = 0.05f;
 	float smoothContour = 0.5f;
 	float feather = 0.0f;
+    bool background_image;
+    std::string background_image_path;
 	std::string Device;
 	std::string modelSelection;
 
@@ -68,12 +70,7 @@ struct background_removal_filter {
 	int maskEveryXFramesCount = 0;
 
     std::shared_ptr<AsyncPipeline> pipeline;
-  
-#if _WIN32
-	const wchar_t* modelFilepath = nullptr;
-#else
-	const char* modelFilepath = nullptr;
-#endif
+
 };
 
 
@@ -89,6 +86,14 @@ static const char* filter_getname(void* unused)
 static obs_properties_t* filter_properties(void* data)
 {
 	obs_properties_t* props = obs_properties_create();
+
+    obs_property_t* p_model_path = obs_properties_add_path(
+        props,
+        "modelFilepath",
+        obs_module_text("Inference Model Path"),
+        OBS_PATH_FILE,
+        ("*.xml"),
+        "");
 
 
 	obs_property_t* p_contour_filter = obs_properties_add_float_slider(
@@ -119,6 +124,19 @@ static obs_properties_t* filter_properties(void* data)
 		props,
 		"replaceColor",
 		obs_module_text("Background Color"));
+
+    obs_property_t* p_background_image = obs_properties_add_bool(
+        props,
+        "AddCustomBackground",
+        obs_module_text("Replace Background with custom image"));
+
+    obs_property_t* p_background_image_path = obs_properties_add_path(
+        props,
+        "CustomImagePath",
+        obs_module_text("Custom Background Image Path"),
+        OBS_PATH_FILE,
+        ("*.jpeg" " * .jpg"),
+        "");
 
     obs_property_t* p_blur = obs_properties_add_bool(
         props,
@@ -170,10 +188,13 @@ static obs_properties_t* filter_properties(void* data)
 }
 
 static void filter_defaults(obs_data_t* settings) {
+    obs_data_set_default_string(settings, "modelFilepath", "D:\\open_model_zoo\\models\\public\\deeplabv3\\FP16\\deeplabv3.xml");
 	obs_data_set_default_double(settings, "contour_filter", 0.05);
 	obs_data_set_default_double(settings, "smooth_contour", 0.5);
 	obs_data_set_default_double(settings, "feather", 0.0);
 	obs_data_set_default_int(settings, "replaceColor", 0x000000);
+    obs_data_set_default_bool(settings, "AddCustomBackground", false);
+    obs_data_set_default_string(settings, "CustomImagePath", "");
     obs_data_set_default_bool(settings, "blur_background", false);
     obs_data_set_default_int(settings, "blur_background_value", 21);
 	obs_data_set_default_string(settings, "Device", DEVICE_CPU);
@@ -199,11 +220,15 @@ static void filter_update(void* data, obs_data_t* settings)
 {
 	struct background_removal_filter* tf = reinterpret_cast<background_removal_filter*>(data);
 
+    tf->modelFilepath = obs_data_get_string(settings, "modelFilepath");
+
 	uint64_t color = obs_data_get_int(settings, "replaceColor");
 	tf->backgroundColor.val[0] = (double)((color >> 16) & 0x0000ff);
 	tf->backgroundColor.val[1] = (double)((color >> 8) & 0x0000ff);
 	tf->backgroundColor.val[2] = (double)(color & 0x0000ff);
 
+    tf->background_image = obs_data_get_bool(settings, "AddCustomBackground");
+    tf->background_image_path = obs_data_get_string(settings, "CustomImagePath");
 
     tf->blur = obs_data_get_bool(settings, "blur_background");
     tf->blur_value = (int)obs_data_get_int(settings, "blur_background_value");
@@ -233,7 +258,7 @@ static void filter_update(void* data, obs_data_t* settings)
     {
         tf->Device = current_device;
         blog(LOG_INFO, "updating pipeline to use %s", tf->Device.c_str());
-        tf->pipeline = std::make_shared<AsyncPipeline>(std::unique_ptr<SegmentationModel>(new SegmentationModel(modelFilepathS, false, "")),
+        tf->pipeline = std::make_shared<AsyncPipeline>(std::unique_ptr<SegmentationModel>(new SegmentationModel(tf->modelFilepath, false, "")),
             ConfigFactory::getUserConfig(tf->Device, 1, "", 0),
             core);
     }
@@ -244,11 +269,11 @@ static void filter_update(void* data, obs_data_t* settings)
 
 static void* filter_create(obs_data_t* settings, obs_source_t* source)
 {
-    background_removal_filter* tf = new background_removal_filter;// reinterpret_cast<background_removal_filter*>(bzalloc(sizeof(struct background_removal_filter)));
+    background_removal_filter* tf = new background_removal_filter;
 
 
 	std::string instanceName{ "background-removal-inference-ov" };
-	//tf->env.reset(new Ort::Env(OrtLoggingLevel::ORT_LOGGING_LEVEL_ERROR, instanceName.c_str()));
+	
 
 	tf->modelSelection = MODEL_DEEPLABV3;
 	filter_update(tf, settings);
@@ -413,7 +438,6 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 	// Convert to BGR
 	cv::Mat imageBGR = convertFrameToBGR(frame, tf);
 
-   
 
 	cv::Mat backgroundMask(imageBGR.size(), CV_8UC1, cv::Scalar(255));
 
@@ -437,7 +461,7 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
     cv::Mat alpha_im;
 	// Apply the mask back to the main image.
 	try {
-		if ((tf->feather > 0.0) && (!tf->blur)) {
+		if ((tf->feather > 0.0) && (!tf->blur) && (!tf->background_image)) {
 			// If we're going to feather/alpha blend, we need to do some processing that
 			// will combine the blended "foreground" and "masked background" images onto the main image.
 			cv::Mat maskFloat;
@@ -473,13 +497,28 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 
                            if (backgroundMask.at<uchar>(row, col)){
                            
-                               imageBGR.at<cv::Vec3b>(row, col) = bg.at<cv::Vec3b>(row, col);
-                            
-                        }
-
+                              imageBGR.at<cv::Vec3b>(row, col) = bg.at<cv::Vec3b>(row, col);
+                             
+                           }
                     }
                 }
-                
+            }
+            else if ((tf->background_image) && (!tf->blur))
+            {
+                cv::Mat customImage = cv::imread(tf->background_image_path);
+                cv::resize(customImage, customImage, imageBGR.size());
+                for (int row = 0; row < backgroundMask.rows; ++row)
+                {
+                    for (int col = 0; col < backgroundMask.cols; ++col) {
+
+                        if (backgroundMask.at<uchar>(row, col)) {
+
+                            imageBGR.at<cv::Vec3b>(row, col) = customImage.at<cv::Vec3b>(row, col);
+                        }
+                    }
+                }
+
+
             }
             else
 			imageBGR.setTo(tf->backgroundColor, backgroundMask);
