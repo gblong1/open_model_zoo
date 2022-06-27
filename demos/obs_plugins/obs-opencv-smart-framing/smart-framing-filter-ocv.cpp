@@ -9,6 +9,7 @@
 #include <memory>
 #include <exception>
 #include <fstream>
+#include <list>
 
 #include <opencv2/gapi/streaming/cap.hpp>
 #include <opencv2/gapi/imgproc.hpp>
@@ -81,7 +82,17 @@ struct smart_framing_filter {
     video_scaler_t* scalerToBGR = nullptr;
     video_scaler_t* scalerFromBGR = nullptr;
 
+    int sum_x = 0;
+    int sum_y = 0;
+    int sum_w = 0;
+    int sum_h = 0;
+
+    std::list<cv::Rect> roi_list;
+
+
     std::string Device;
+    bool bDebug_mode;
+    bool bSmoothMode;
 };
 
 static const char* filter_getname(void* unused)
@@ -96,6 +107,14 @@ static const char* filter_getname(void* unused)
 static obs_properties_t* filter_properties(void* data)
 {
 	obs_properties_t* props = obs_properties_create();
+
+    obs_property_t* p_debug = obs_properties_add_bool(props,
+        "Debug-Mode",
+        "Draw rectangle overlays to original frame");
+
+    obs_property_t* p_smooth = obs_properties_add_bool(props,
+        "Smooth",
+        "Smooth");
 
 	obs_property_t* p_inf_device = obs_properties_add_list(
 		props,
@@ -113,6 +132,8 @@ static obs_properties_t* filter_properties(void* data)
 }
 
 static void filter_defaults(obs_data_t* settings) {
+    obs_data_set_default_bool(settings, "Debug-Mode", false);
+    obs_data_set_default_bool(settings, "Smooth", true);
 	obs_data_set_default_string(settings, "Device", DEVICE_CPU);
 }
 
@@ -138,16 +159,7 @@ static std::shared_ptr<cv::GComputation> generate_smart_framing_graph()
         0.5, //YOLO v4 Tiny box IOU threshold.
         true); //use advanced post-processing for the YOLO v4 Tiny.
 
-    if (false) 
-    {
-        out = custom::GSmartFramingMakeBorderKernel::on(in, yolo_detections);
-    }
-    else
-    {
-        out = custom::GSmartFramingKernel::on(in, yolo_detections);
-    }
-
-    return std::make_shared<cv::GComputation>(cv::GIn(in, labels), cv::GOut(cv::gapi::copy(in), yolo_detections, out, out));
+    return std::make_shared<cv::GComputation>(cv::GIn(in, labels), cv::GOut(yolo_detections));
 }
 
 static void filter_update(void* data, obs_data_t* settings)
@@ -155,6 +167,9 @@ static void filter_update(void* data, obs_data_t* settings)
     struct smart_framing_filter* tf = reinterpret_cast<smart_framing_filter*>(data);
 
     const std::string current_device = obs_data_get_string(settings, "Device");
+
+    tf->bDebug_mode = obs_data_get_bool(settings, "Debug-Mode");
+    tf->bSmoothMode = obs_data_get_bool(settings, "Smooth");
 
     if (!tf->compute || (tf->Device != current_device))
     {
@@ -267,14 +282,11 @@ static void convertBGRToFrame(
 
 static struct obs_source_frame* filter_render(void* data, struct obs_source_frame* frame)
 {
-	struct smart_framing_filter* tf = reinterpret_cast<smart_framing_filter*>(data);
+    struct smart_framing_filter* tf = reinterpret_cast<smart_framing_filter*>(data);
 
     // Convert to BGR
     cv::Mat imageBGR = convertFrameToBGR(frame, tf);
 
-    cv::Mat image;
-    cv::Mat out_image;
-    cv::Mat out_image_sr;
     std::vector<custom::DetectedObject> objects;
 
     auto compute = tf->compute;
@@ -295,10 +307,120 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 
     try {
         compute->apply(cv::gin(imageBGR, coco_labels),
-            cv::gout(image, objects, out_image, out_image_sr),
+            cv::gout(objects),
             cv::compile_args(kernels, networks));
 
-        convertBGRToFrame(out_image, frame, tf);
+        cv::Rect init_rect;
+        bool person_found = false;
+        for (const auto& el : objects) {
+            if (el.labelID == 0) {//person ID
+                person_found = true;
+                init_rect = init_rect | static_cast<cv::Rect>(el);
+            }
+        }
+
+        //if our ROI list contains at least 30 frames OR we did not find a person
+        // TODO: Make '30' here, configurable. 
+        if (tf->roi_list.size() >= 30 || init_rect.empty())
+        {
+            // pop off the oldest ROI from our list
+            if (!tf->roi_list.empty())
+            {
+                cv::Rect oldest_roi = tf->roi_list.front();
+                tf->sum_x -= oldest_roi.x;
+                tf->sum_y -= oldest_roi.y;
+                tf->sum_w -= oldest_roi.width;
+                tf->sum_h -= oldest_roi.height;
+                tf->roi_list.pop_front();
+            }
+        }
+
+        //if we found a person, push this ROI to our list, update our sum
+        if (!init_rect.empty())
+        {
+            tf->roi_list.push_back(init_rect);
+            tf->sum_x += init_rect.x;
+            tf->sum_y += init_rect.y;
+            tf->sum_w += init_rect.width;
+            tf->sum_h += init_rect.height;
+        }
+
+        //if we have at least 1 ROI to calculate an ROI from
+        cv::Rect avg_roi;
+        if (!tf->roi_list.empty())
+        {
+            avg_roi.x = tf->sum_x / tf->roi_list.size();
+            avg_roi.y = tf->sum_y / tf->roi_list.size();
+            avg_roi.width = tf->sum_w / tf->roi_list.size();
+            avg_roi.height = tf->sum_h / tf->roi_list.size();
+        }
+        else
+        {
+            // no people detected for 30 frames..
+            // just return original frame
+            return frame;
+        }
+
+        cv::Rect the_roi;
+        if (tf->bSmoothMode)
+        {
+            the_roi = avg_roi;
+        }
+        else
+        {
+            the_roi = init_rect;
+        }
+
+        //calculate cropped region, and perform crop + resize
+        {
+            //calulcate adjusted ROI
+            cv::Rect adjusted_rect;
+            adjusted_rect.y = the_roi.y;
+            adjusted_rect.height = the_roi.height;
+            adjusted_rect.width = static_cast<int>((static_cast<float>(imageBGR.size().width) *
+                static_cast<float>(the_roi.height)) /
+                (static_cast<float>(imageBGR.size().height)));
+            int x_delta = adjusted_rect.width - the_roi.width;
+            int even_x_delta = (x_delta % 2 == 0) ? (x_delta) : (x_delta - 1);
+            adjusted_rect.x = the_roi.x - (even_x_delta / 2);
+
+            //collision with left side of scene
+            if (adjusted_rect.x < 0) {
+                adjusted_rect.x = 0;
+            }
+
+            //collision with right side of scene
+            if (adjusted_rect.x + adjusted_rect.width > imageBGR.size().width) {
+                adjusted_rect.x = imageBGR.size().width - adjusted_rect.width;
+            }
+
+            if (tf->bDebug_mode)
+            {
+                //in debug mode, just overlay ROI's onto original frame, instead
+                // of performing 'real' crop / resize.
+                cv::rectangle(imageBGR, adjusted_rect, cv::Scalar{ 0,255,255 }, 3, cv::LINE_8, 0);
+                cv::rectangle(imageBGR, the_roi, cv::Scalar{ 255,0,0 }, 3, cv::LINE_8, 0);
+
+                //Draw detections on original image
+                for (const auto& el : objects) {
+                    slog::debug << el << slog::endl;
+                    cv::rectangle(imageBGR, el, cv::Scalar{ 0,255,0 }, 2, cv::LINE_8, 0);
+                    cv::putText(imageBGR, el.label, el.tl(), cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0,255,0 }, 2);
+                }
+            }
+            else
+            {
+                //crop
+                cv::Mat SF_ROI;
+                imageBGR(adjusted_rect).copyTo(SF_ROI);
+
+                //resize
+                cv::resize(SF_ROI, imageBGR, imageBGR.size());
+            }
+        }
+
+        convertBGRToFrame(imageBGR, frame, tf);
+  
     }
     catch (const std::exception& error) {
         blog(LOG_INFO, "in G-API apply method, exception: %s", error.what());
@@ -309,6 +431,7 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 
     return frame;
 }
+
 
 
 static void filter_destroy(void* data)
