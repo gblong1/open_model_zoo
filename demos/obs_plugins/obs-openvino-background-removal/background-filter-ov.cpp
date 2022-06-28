@@ -188,7 +188,7 @@ static obs_properties_t* filter_properties(void* data)
 }
 
 static void filter_defaults(obs_data_t* settings) {
-    obs_data_set_default_string(settings, "modelFilepath", "D:\\open_model_zoo\\models\\public\\deeplabv3\\FP16\\deeplabv3.xml");
+    obs_data_set_default_string(settings, "modelFilepath", "C:\\Users\\arishaku\\deeplabv3\\FP16\\deeplabv3.xml"); //"C:\\Users\\arishaku\\deeplabv3\\FP16\\deeplabv3.xml" //"D:\\open_model_zoo\\models\\public\\deeplabv3\\FP16\\deeplabv3.xml"
 	obs_data_set_default_double(settings, "contour_filter", 0.05);
 	obs_data_set_default_double(settings, "smooth_contour", 0.5);
 	obs_data_set_default_double(settings, "feather", 0.0);
@@ -218,9 +218,11 @@ static void destroyScalers(struct background_removal_filter* tf) {
 
 static void filter_update(void* data, obs_data_t* settings)
 {
+    
 	struct background_removal_filter* tf = reinterpret_cast<background_removal_filter*>(data);
 
     tf->modelFilepath = obs_data_get_string(settings, "modelFilepath");
+
 
 	uint64_t color = obs_data_get_int(settings, "replaceColor");
 	tf->backgroundColor.val[0] = (double)((color >> 16) & 0x0000ff);
@@ -254,13 +256,22 @@ static void filter_update(void* data, obs_data_t* settings)
 
 	}
 
-    if (!tf->pipeline || (tf->Device != current_device))
-    {
-        tf->Device = current_device;
-        blog(LOG_INFO, "updating pipeline to use %s", tf->Device.c_str());
-        tf->pipeline = std::make_shared<AsyncPipeline>(std::unique_ptr<SegmentationModel>(new SegmentationModel(tf->modelFilepath, false, "")),
-            ConfigFactory::getUserConfig(tf->Device, 1, "", 0),
-            core);
+    try {
+        if (!tf->pipeline || (tf->Device != current_device))
+        {
+            tf->Device = current_device;
+            blog(LOG_INFO, "updating pipeline to use %s", tf->Device.c_str());
+            tf->pipeline = std::make_shared<AsyncPipeline>(std::unique_ptr<SegmentationModel>(new SegmentationModel(tf->modelFilepath, false, "")),
+                ConfigFactory::getUserConfig(tf->Device, 1, "", 0),
+                core);
+        }
+    }
+
+    catch
+        (const std::exception& e) {
+        blog(LOG_ERROR, "%s", e.what());
+        tf->pipeline.reset();
+        return;
     }
 }
 
@@ -276,7 +287,11 @@ static void* filter_create(obs_data_t* settings, obs_source_t* source)
 	
 
 	tf->modelSelection = MODEL_DEEPLABV3;
-	filter_update(tf, settings);
+
+   
+    filter_update(tf, settings);
+   
+   
 
 	return tf;
 }
@@ -363,6 +378,13 @@ static void processImageForBackground(
 	std::unique_ptr<ResultBase> result;
 
     auto pipeline = tf->pipeline;
+
+    if (!pipeline)
+    {
+        blog(LOG_INFO, "Pipeline not valid");
+        backgroundMask = cv::Mat::zeros(imageBGR.size(), CV_8UC1);
+        return;
+    }
 
 	try {
 		// To RGB
