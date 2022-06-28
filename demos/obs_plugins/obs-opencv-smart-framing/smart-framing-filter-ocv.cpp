@@ -93,6 +93,9 @@ struct smart_framing_filter {
     std::string Device;
     bool bDebug_mode;
     bool bSmoothMode;
+
+    cv::gapi::GNetPackage networks;
+    cv::gapi::GKernelPackage kernels;
 };
 
 static const char* filter_getname(void* unused)
@@ -176,6 +179,16 @@ static void filter_update(void* data, obs_data_t* settings)
         blog(LOG_INFO, "filter update: Creating new G-API Compute. Device = %s", tf->Device.c_str());
         tf->Device = current_device;
         tf->compute = generate_smart_framing_graph();
+
+        const auto net = cv::gapi::ie::Params<YOLOv4TinyNet>{
+                modelFilepathS,                         // path to topology IR
+                fileNameNoExt(modelFilepathS) + ".bin", // path to weights
+                tf->Device }.cfgOutputLayers({ "conv2d_20/BiasAdd/Add", "conv2d_17/BiasAdd/Add" }).cfgInputLayers({ "image_input" });
+        tf->networks = cv::gapi::networks(net);
+
+        /** Custom kernels plus CPU or Fluid **/
+        tf->kernels = cv::gapi::combine(custom::kernels(),
+            util::getKernelPackage("opencv"));
     }
 
 }
@@ -290,25 +303,12 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
     std::vector<custom::DetectedObject> objects;
 
     auto compute = tf->compute;
-
-    //TODO: Move this stuff outside of filter_render()
-    cv::gapi::GNetPackage networks;
-    const auto net = cv::gapi::ie::Params<YOLOv4TinyNet>{
-            modelFilepathS,                         // path to topology IR
-            fileNameNoExt(modelFilepathS) + ".bin", // path to weights
-            tf->Device }.cfgOutputLayers({ "conv2d_20/BiasAdd/Add", "conv2d_17/BiasAdd/Add" }).cfgInputLayers({ "image_input" });
-    networks = cv::gapi::networks(net);
-
-    /** Custom kernels plus CPU or Fluid **/
-    auto kernels = cv::gapi::combine(custom::kernels(),
-        util::getKernelPackage("opencv"));
-
     std::vector<std::string> coco_labels;
 
     try {
         compute->apply(cv::gin(imageBGR, coco_labels),
             cv::gout(objects),
-            cv::compile_args(kernels, networks));
+            cv::compile_args(tf->kernels, tf->networks));
 
         cv::Rect init_rect;
         bool person_found = false;
