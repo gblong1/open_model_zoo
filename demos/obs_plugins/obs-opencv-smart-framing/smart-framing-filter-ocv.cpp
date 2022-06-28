@@ -49,9 +49,6 @@ const char* DEVICE_CPU = "CPU";
 const char* DEVICE_VPU = "VPUX";
 const char* DEVICE_GPU = "GPU";
 
-std::string modelFilepathS = "D:\\clientmodels\\BDK4\\yolo-v4-tiny\\tf\\FP16-INT8\\yolo-v4-tiny.xml";
-//AsyncPipeline pipeline;
-
 namespace util {
 
     static cv::gapi::GKernelPackage getKernelPackage(const std::string& type) {
@@ -89,6 +86,7 @@ struct smart_framing_filter {
 
     std::list<cv::Rect> roi_list;
 
+    std::string modelFilepathS;
 
     std::string Device;
     bool bDebug_mode;
@@ -130,6 +128,14 @@ static obs_properties_t* filter_properties(void* data)
 	obs_property_list_add_string(p_inf_device, obs_module_text("GPU"), DEVICE_GPU);
 	obs_property_list_add_string(p_inf_device, obs_module_text("VPU"), DEVICE_VPU);
 
+    obs_property_t* p_model_path = obs_properties_add_path(
+        props,
+        "modelFilepath",
+        obs_module_text("Inference Model Path"),
+        OBS_PATH_FILE,
+        ("*.xml"),
+        "");
+
 	UNUSED_PARAMETER(data);
 	return props;
 }
@@ -138,6 +144,7 @@ static void filter_defaults(obs_data_t* settings) {
     obs_data_set_default_bool(settings, "Debug-Mode", false);
     obs_data_set_default_bool(settings, "Smooth", true);
 	obs_data_set_default_string(settings, "Device", DEVICE_CPU);
+    obs_data_set_default_string(settings, "modelFilepath", "D:\\clientmodels\\BDK4\\yolo-v4-tiny\\tf\\FP16-INT8\\yolo-v4-tiny.xml");
 }
 
 
@@ -174,15 +181,19 @@ static void filter_update(void* data, obs_data_t* settings)
     tf->bDebug_mode = obs_data_get_bool(settings, "Debug-Mode");
     tf->bSmoothMode = obs_data_get_bool(settings, "Smooth");
 
-    if (!tf->compute || (tf->Device != current_device))
+    const std::string current_model = obs_data_get_string(settings, "modelFilepath");
+
+    if (!tf->compute || (tf->Device != current_device) || (tf->modelFilepathS != current_model))
     {
         blog(LOG_INFO, "filter update: Creating new G-API Compute. Device = %s", tf->Device.c_str());
+        blog(LOG_INFO, "IE model used = %s", tf->modelFilepathS.c_str());
         tf->Device = current_device;
+        tf->modelFilepathS = current_model;
         tf->compute = generate_smart_framing_graph();
 
         const auto net = cv::gapi::ie::Params<YOLOv4TinyNet>{
-                modelFilepathS,                         // path to topology IR
-                fileNameNoExt(modelFilepathS) + ".bin", // path to weights
+                tf->modelFilepathS,                         // path to topology IR
+                fileNameNoExt(tf->modelFilepathS) + ".bin", // path to weights
                 tf->Device }.cfgOutputLayers({ "conv2d_20/BiasAdd/Add", "conv2d_17/BiasAdd/Add" }).cfgInputLayers({ "image_input" });
         tf->networks = cv::gapi::networks(net);
 
@@ -197,23 +208,13 @@ static void* filter_create(obs_data_t* settings, obs_source_t* source)
 {
     smart_framing_filter* tf = new smart_framing_filter;
 
-    char* model_env_val = std::getenv("OBS_SMART_FRAMING_MODEL_XML");
-    if (model_env_val)
-    {
-        modelFilepathS = model_env_val;
-    }
-
-    blog(LOG_INFO, "IE model used = %s", modelFilepathS.c_str());
-
     /** Configure networks **/
 	filter_update(tf, settings);
 
-    blog(LOG_INFO, "<-filter_create");
 	return tf;
 }
 
 static void destroyScalers(struct smart_framing_filter* tf) {
-    blog(LOG_INFO, "Destroy scalers.");
     if (tf->scalerToBGR != nullptr) {
         video_scaler_destroy(tf->scalerToBGR);
         tf->scalerToBGR = nullptr;
