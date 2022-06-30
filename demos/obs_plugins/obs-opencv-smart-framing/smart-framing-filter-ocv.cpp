@@ -69,12 +69,6 @@ namespace util {
 } // namespace util
 
 struct smart_framing_filter {
-	
-	float threshold = 0.5f;
-
-    std::shared_ptr<cv::GComputation> compute;
-    cv::GCompileArgs compute_compile_args;
-
     // Use the media-io converter to both scale and convert the colorspace
     video_scaler_t* scalerToBGR = nullptr;
     video_scaler_t* scalerFromBGR = nullptr;
@@ -83,17 +77,22 @@ struct smart_framing_filter {
     int sum_y = 0;
     int sum_w = 0;
     int sum_h = 0;
-
     std::list<cv::Rect> roi_list;
 
-    std::string modelFilepathS;
-
-    std::string Device;
     bool bDebug_mode;
     bool bSmoothMode;
 
-    cv::gapi::GNetPackage networks;
-    cv::gapi::GKernelPackage kernels;
+    std::string modelFilepathYolov4S;
+    std::string Device_Yolov4;
+    std::shared_ptr<cv::GComputation> compute_yolov4;
+    cv::gapi::GNetPackage yolov4_tiny_networks;
+    cv::gapi::GKernelPackage yolov4_tiny_kernels;
+
+    std::string modelFilepathSRS;
+    std::string Device_SR;
+    std::shared_ptr<cv::GComputation> compute_sr;
+    cv::gapi::GNetPackage sr_networks;
+    cv::gapi::GKernelPackage sr_kernels;
 };
 
 static const char* filter_getname(void* unused)
@@ -117,21 +116,44 @@ static obs_properties_t* filter_properties(void* data)
         "Smooth",
         "Smooth");
 
-	obs_property_t* p_inf_device = obs_properties_add_list(
+    obs_property_t* p_sr_enabled = obs_properties_add_bool(props,
+        "SuperResolutionEnabled",
+        "Enable Super Resolution");
+
+	obs_property_t* p_yolov4_inf_device = obs_properties_add_list(
 		props,
-		"Device",
-		obs_module_text("Inference device"),
+		"Yolov4TinyDevice",
+		obs_module_text("Yolov4 Tiny Inference Device"),
 		OBS_COMBO_TYPE_LIST,
 		OBS_COMBO_FORMAT_STRING);
 
-	obs_property_list_add_string(p_inf_device, obs_module_text("CPU"), DEVICE_CPU);
-	obs_property_list_add_string(p_inf_device, obs_module_text("GPU"), DEVICE_GPU);
-	obs_property_list_add_string(p_inf_device, obs_module_text("VPU"), DEVICE_VPU);
+	obs_property_list_add_string(p_yolov4_inf_device, obs_module_text("CPU"), DEVICE_CPU);
+	obs_property_list_add_string(p_yolov4_inf_device, obs_module_text("GPU"), DEVICE_GPU);
+	obs_property_list_add_string(p_yolov4_inf_device, obs_module_text("VPU"), DEVICE_VPU);
 
-    obs_property_t* p_model_path = obs_properties_add_path(
+    obs_property_t* p_sr_device = obs_properties_add_list(
         props,
-        "modelFilepath",
-        obs_module_text("Inference Model Path"),
+        "SuperResolutionDevice",
+        obs_module_text("Super Resolution Device"),
+        OBS_COMBO_TYPE_LIST,
+        OBS_COMBO_FORMAT_STRING);
+
+    obs_property_list_add_string(p_sr_device, obs_module_text("CPU"), DEVICE_CPU);
+    obs_property_list_add_string(p_sr_device, obs_module_text("GPU"), DEVICE_GPU);
+    obs_property_list_add_string(p_sr_device, obs_module_text("VPU"), DEVICE_VPU);
+
+    obs_property_t* p_yv4_model_path = obs_properties_add_path(
+        props,
+        "Yolov4TinyModelPath",
+        obs_module_text("Path To Yolo V4 Tiny OpenVINO Model"),
+        OBS_PATH_FILE,
+        ("*.xml"),
+        "");
+
+    obs_property_t* p_sr_model_path = obs_properties_add_path(
+        props,
+        "SuperResolutionModelPath",
+        obs_module_text("Path To Super Resolution OpenVINO Model"),
         OBS_PATH_FILE,
         ("*.xml"),
         "");
@@ -143,16 +165,23 @@ static obs_properties_t* filter_properties(void* data)
 static void filter_defaults(obs_data_t* settings) {
     obs_data_set_default_bool(settings, "Debug-Mode", false);
     obs_data_set_default_bool(settings, "Smooth", true);
-	obs_data_set_default_string(settings, "Device", DEVICE_CPU);
-    obs_data_set_default_string(settings, "modelFilepath", "D:\\clientmodels\\BDK4\\yolo-v4-tiny\\tf\\FP16-INT8\\yolo-v4-tiny.xml");
+    obs_data_set_default_bool(settings, "SuperResolutionEnabled", false);
+	obs_data_set_default_string(settings, "Yolov4TinyDevice", DEVICE_CPU);
+    obs_data_set_default_string(settings, "SuperResolutionDevice", DEVICE_CPU);
+    obs_data_set_default_string(settings, "Yolov4TinyModelPath", "D:\\clientmodels\\BDK4\\yolo-v4-tiny\\tf\\FP16-INT8\\yolo-v4-tiny.xml");
+    obs_data_set_default_string(settings, "SuperResolutionModelPath", "D:\\Ryan\\open_model_zoo\\demos\\image_processing_demo\\cpp\\intel\\single-image-super-resolution-1032\\FP16\\single-image-super-resolution-1032.xml");
 }
 
 
 /**                   FILTER CORE                     */
 using GMat2 = std::tuple<cv::GMat, cv::GMat>;
 G_API_NET(YOLOv4TinyNet, <GMat2(cv::GMat)>, "yolov4tiny_detector");
+G_API_NET(SRNet, <cv::GMat(cv::GMat)>, "super_resolution");
+G_API_NET(SRNet3ch, <cv::GMat(cv::GMat, cv::GMat)>, "super_resolution_3ch");
+using sr_net = cv::gapi::ie::Params<SRNet>;
+using sr_net3ch = cv::gapi::ie::Params<SRNet3ch>;
 
-static std::shared_ptr<cv::GComputation> generate_smart_framing_graph()
+static std::shared_ptr<cv::GComputation> generate_yolov4_compute()
 {
     // Now build the graph
     cv::GMat in;
@@ -172,34 +201,107 @@ static std::shared_ptr<cv::GComputation> generate_smart_framing_graph()
     return std::make_shared<cv::GComputation>(cv::GIn(in, labels), cv::GOut(yolo_detections));
 }
 
+static std::shared_ptr<cv::GComputation> generate_super_resolution_compute(bool use_single_channel_sr)
+{
+    cv::GMat in;
+    cv::GMat out_sr;
+    cv::GMat out_sr_pp; //cropped resized output image after super resolution post processing
+    
+    if (use_single_channel_sr)
+    {
+        cv::GMat b, g, r;
+        std::tie(b, g, r) = cv::gapi::split3(in);
+        auto out_b = custom::GCvt32Fto8U::on(cv::gapi::infer<SRNet>(b));
+        auto out_g = custom::GCvt32Fto8U::on(cv::gapi::infer<SRNet>(g));
+        auto out_r = custom::GCvt32Fto8U::on(cv::gapi::infer<SRNet>(r));
+        out_sr_pp = cv::gapi::merge3(out_b, out_g, out_r);
+        return std::make_shared<cv::GComputation>(cv::GIn(in), cv::GOut(out_sr_pp));
+    }
+    else
+    {
+        out_sr = cv::gapi::infer<SRNet3ch>(in, in);
+        out_sr_pp = custom::GSuperResolutionPostProcessingKernel::on(out_sr);
+        return std::make_shared<cv::GComputation>(cv::GIn(in), cv::GOut(out_sr_pp));
+    }
+}
+
 static void filter_update(void* data, obs_data_t* settings)
 {
     struct smart_framing_filter* tf = reinterpret_cast<smart_framing_filter*>(data);
 
-    const std::string current_device = obs_data_get_string(settings, "Device");
+    const std::string current_yolov4_device = obs_data_get_string(settings, "Yolov4TinyDevice");
+    const std::string current_sr_device = obs_data_get_string(settings, "SuperResolutionDevice");
 
     tf->bDebug_mode = obs_data_get_bool(settings, "Debug-Mode");
     tf->bSmoothMode = obs_data_get_bool(settings, "Smooth");
 
-    const std::string current_model = obs_data_get_string(settings, "modelFilepath");
+    bool bCurrentSuperResolutionEnabled = obs_data_get_bool(settings, "SuperResolutionEnabled");
+ 
+    const std::string current_yolov4_tiny_model = obs_data_get_string(settings, "Yolov4TinyModelPath");
+    const std::string current_sr_model = obs_data_get_string(settings, "SuperResolutionModelPath");
 
-    if (!tf->compute || (tf->Device != current_device) || (tf->modelFilepathS != current_model))
+
+    if (!tf->compute_yolov4 || (tf->Device_Yolov4 != current_yolov4_device) || (tf->modelFilepathYolov4S != current_yolov4_tiny_model))
     {
-        blog(LOG_INFO, "filter update: Creating new G-API Compute. Device = %s", tf->Device.c_str());
-        blog(LOG_INFO, "IE model used = %s", tf->modelFilepathS.c_str());
-        tf->Device = current_device;
-        tf->modelFilepathS = current_model;
-        tf->compute = generate_smart_framing_graph();
+        tf->Device_Yolov4 = current_yolov4_device;
+        tf->modelFilepathYolov4S = current_yolov4_tiny_model;
+
+        blog(LOG_INFO, "filter update: Creating new G-API YoloV4 Compute. Device = %s", tf->Device_Yolov4.c_str());
+        blog(LOG_INFO, "IE model used = %s", tf->modelFilepathYolov4S.c_str());
+
+        tf->compute_yolov4 = generate_yolov4_compute();
 
         const auto net = cv::gapi::ie::Params<YOLOv4TinyNet>{
-                tf->modelFilepathS,                         // path to topology IR
-                fileNameNoExt(tf->modelFilepathS) + ".bin", // path to weights
-                tf->Device }.cfgOutputLayers({ "conv2d_20/BiasAdd/Add", "conv2d_17/BiasAdd/Add" }).cfgInputLayers({ "image_input" });
-        tf->networks = cv::gapi::networks(net);
+                tf->modelFilepathYolov4S,                         // path to topology IR
+                fileNameNoExt(tf->modelFilepathYolov4S) + ".bin", // path to weights
+                tf->Device_Yolov4 }.cfgOutputLayers({ "conv2d_20/BiasAdd/Add", "conv2d_17/BiasAdd/Add" }).cfgInputLayers({ "image_input" });
+        tf->yolov4_tiny_networks = cv::gapi::networks(net);
 
         /** Custom kernels plus CPU or Fluid **/
-        tf->kernels = cv::gapi::combine(custom::kernels(),
-            util::getKernelPackage("opencv"));
+        tf->yolov4_tiny_kernels = cv::gapi::combine(custom::kernels(),
+                                  util::getKernelPackage("opencv"));
+    }
+
+    if (!bCurrentSuperResolutionEnabled)
+    {
+        tf->compute_sr.reset();
+    }
+    else
+    {
+        if (!tf->compute_sr || (tf->Device_SR != current_sr_device) || (tf->modelFilepathSRS != current_sr_model))
+        {
+            tf->Device_SR = current_sr_device;
+            tf->modelFilepathSRS = current_sr_model;
+
+            blog(LOG_INFO, "filter update: Creating new G-API Super Resolution Compute. Device = %s", tf->Device_SR.c_str());
+            blog(LOG_INFO, "IE model used = %s", tf->modelFilepathSRS.c_str());
+
+            // A heads up... when 'use_single_channel_sr' is set to 'true',
+            // compute_sr->apply (in filter_render) seems to hang... So,
+            // don't expose this as a property for now, and just hardcode to 'false'
+            bool use_single_channel_sr = false;
+            tf->compute_sr = generate_super_resolution_compute(use_single_channel_sr);
+            auto sr = sr_net{
+                tf->modelFilepathSRS,                         // path to topology IR
+                fileNameNoExt(tf->modelFilepathSRS) + ".bin", // path to weights
+                tf->Device_SR
+            };
+            auto sr3ch = sr_net3ch{
+                tf->modelFilepathSRS,                         // path to topology IR
+                fileNameNoExt(tf->modelFilepathSRS) + ".bin", // path to weights
+                tf->Device_SR
+            }.cfgInputLayers({ "1", "0" });
+
+            if (use_single_channel_sr) {
+                tf->sr_networks = cv::gapi::networks(sr);
+            }
+            else {
+                tf->sr_networks = cv::gapi::networks(sr3ch);
+            }
+
+            tf->sr_kernels = cv::gapi::combine(custom::kernels(),
+                util::getKernelPackage("opencv"));
+        }
     }
 
 }
@@ -303,13 +405,14 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 
     std::vector<custom::DetectedObject> objects;
 
-    auto compute = tf->compute;
+    auto compute_yolov4 = tf->compute_yolov4;
+    auto compute_sr = tf->compute_sr;
     std::vector<std::string> coco_labels;
 
     try {
-        compute->apply(cv::gin(imageBGR, coco_labels),
+        compute_yolov4->apply(cv::gin(imageBGR, coco_labels),
             cv::gout(objects),
-            cv::compile_args(tf->kernels, tf->networks));
+            cv::compile_args(tf->yolov4_tiny_kernels, tf->yolov4_tiny_networks));
 
         cv::Rect init_rect;
         bool person_found = false;
@@ -415,8 +518,35 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
                 cv::Mat SF_ROI;
                 imageBGR(adjusted_rect).copyTo(SF_ROI);
 
-                //resize
+                // Something that may be confusing here is that, even if super-resolution is enabled,
+                // we perform a cv::resize of SF_ROI here, as opposed to just passing it as an input
+                // to compute_sr->apply(). The reason for this is, we would expect SF_ROI to have a
+                // different size for (nearly) every frame. And if the image we pass as a parameter
+                // to compute_sr->apply() has a different size than we did on the previous frame, there
+                // will be an implicit re-compilation, and it will slow things down to a crawl..
+                // TODO: something that may (or may not) add some efficiency, is if we cached
+                // a collection of SR GCompute objects for various input sizes
+                //(e.g. 1920x1080, 1280x720, 640x360, etc.), and scale-to / use the GCompute object
+                // for the closest size.
                 cv::resize(SF_ROI, imageBGR, imageBGR.size());
+
+                //if super-resolution is enabled, apply that to the cropped image
+                if (compute_sr)
+                {
+                    try
+                    {
+                        compute_sr->apply(cv::gin(imageBGR),
+                            cv::gout(imageBGR),
+                            cv::compile_args(tf->sr_kernels, tf->sr_networks));
+
+                    }
+                    catch (const std::exception& error) {
+                        blog(LOG_INFO, "in G-API SR apply method, exception: %s", error.what());
+                    }
+                    catch (...) {
+                        blog(LOG_INFO, " in G-API SR apply method Unknown/internal exception happened");
+                    }
+                }
             }
         }
 
@@ -424,10 +554,10 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
   
     }
     catch (const std::exception& error) {
-        blog(LOG_INFO, "in G-API apply method, exception: %s", error.what());
+        blog(LOG_INFO, "in G-API YV4 apply method, exception: %s", error.what());
     }
     catch (...) {
-        blog(LOG_INFO, " in G-API apply method Unknown/internal exception happened");
+        blog(LOG_INFO, " in G-API YV4 apply method Unknown/internal exception happened");
     }
 
     return frame;
