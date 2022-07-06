@@ -107,7 +107,7 @@ void ModelYolo::prepareInputsOutputs(InferenceEngine::CNNNetwork& cnnNetwork) {
         for (const auto op : ngraphFunction->get_ops()) {
             auto outputLayer = outputInfo.find(op->get_friendly_name());
             if (outputLayer != outputInfo.end()) {
-                auto regionYolo = std::dynamic_pointer_cast<ngraph::op::RegionYolo>(op);
+                auto regionYolo = std::dynamic_pointer_cast<ov::op::v0::RegionYolo>(op);
 
                 if (regionYolo) {
                     isRegionFound = true;
@@ -303,7 +303,7 @@ double ModelYolo::intersectionOverUnion(const DetectedObject& o1, const Detected
     return intersectionArea / unionArea;
 }
 
-ModelYolo::Region::Region(const std::shared_ptr<ngraph::op::RegionYolo>& regionYolo) {
+ModelYolo::Region::Region(const std::shared_ptr<ov::op::v0::RegionYolo>& regionYolo) {
     coords = regionYolo->get_num_coords();
     classes = regionYolo->get_num_classes();
     auto mask = regionYolo->get_mask();

@@ -16,15 +16,7 @@
 
 #pragma once
 #include "detection_model.h"
-
-namespace ngraph {
-    namespace op {
-        namespace v0 {
-            class RegionYolo;
-        }
-        using v0::RegionYolo;
-    }
-}
+#include <openvino/op/region_yolo.hpp>
 
 class ModelYolo : public DetectionModel {
 protected:
@@ -37,7 +29,7 @@ protected:
         int outputWidth = 0;
         int outputHeight = 0;
 
-        Region(const std::shared_ptr<ngraph::op::RegionYolo>& regionYolo);
+        Region(const std::shared_ptr<ov::op::v0::RegionYolo>& regionYolo);
         Region(int classes, int coords, const std::vector<float>& anchors, const std::vector<int64_t>& masks, int outputWidth, int outputHeight);
     };
 
