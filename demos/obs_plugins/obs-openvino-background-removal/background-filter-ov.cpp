@@ -34,7 +34,7 @@
 const char* MODEL_DEEPLABV3 = "deeplabv3.xml";
 
 const char* DEVICE_CPU = "CPU";
-const char* DEVICE_VPU = "VPU";
+const char* DEVICE_VPU = "VPUX";
 const char* DEVICE_GPU = "GPU";
 
 InferenceEngine::Core core;
