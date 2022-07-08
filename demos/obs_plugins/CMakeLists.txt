@@ -84,7 +84,7 @@ macro(add_obs_plugin)
     endif()
 	
 	target_link_libraries(${OMZ_OBS_PLUGIN_NAME} PRIVATE ${LIBOBS_LIBRARIES} ${OpenCV_LIBRARIES} ${InferenceEngine_LIBRARIES}
-                                                    ${OMZ_OBS_PLUGIN_DEPENDENCIES} ngraph::ngraph utils gflags)
+                                                    ${OMZ_OBS_PLUGIN_DEPENDENCIES} ngraph::ngraph utils gflags ${ITT_LIBS})
 													
 	if(UNIX)
         target_link_libraries(${OMZ_OBS_PLUGIN_NAME} PRIVATE pthread)

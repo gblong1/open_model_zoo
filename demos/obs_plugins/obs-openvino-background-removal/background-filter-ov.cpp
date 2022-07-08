@@ -7,6 +7,8 @@
 
 #include <opencv2/imgproc.hpp>
 
+#include <ittutils.h>
+
 #include <numeric>
 #include <memory>
 #include <exception>
@@ -258,6 +260,7 @@ static void filter_update(void* data, obs_data_t* settings)
     try {
         if (!tf->pipeline || (tf->Device != current_device))
         {
+            ITT_SCOPED_TASK(bkg_rm_create_async_pipeline)
             tf->Device = current_device;
             blog(LOG_INFO, "updating pipeline to use %s", tf->Device.c_str());
             tf->pipeline = std::make_shared<AsyncPipeline>(std::unique_ptr<SegmentationModel>(new SegmentationModel(tf->modelFilepath, false)),
@@ -333,6 +336,7 @@ static cv::Mat convertFrameToBGR(
 	struct obs_source_frame* frame,
 	struct background_removal_filter* tf
 ) {
+    ITT_SCOPED_TASK(bkg_rm_convertFrameToBGR)
 	const cv::Size frameSize(frame->width, frame->height);
 
 	if (tf->scalerToBGR == nullptr) {
@@ -354,6 +358,7 @@ static void convertBGRToFrame(
 	struct obs_source_frame* frame,
 	struct background_removal_filter* tf
 ) {
+    ITT_SCOPED_TASK(bkg_rm_convertBGRToFrame)
 	if (tf->scalerFromBGR == nullptr) {
 		// Lazy initialize the frame scale & color converter
 		initializeScalers(cv::Size(frame->width, frame->height), frame->format, tf);
@@ -371,7 +376,8 @@ static void processImageForBackground(
 	struct background_removal_filter* tf,
 	const cv::Mat& imageBGR,
 	cv::Mat& backgroundMask)
-{   
+{
+    ITT_SCOPED_TASK(processImageForBackground)
 	//blog(LOG_INFO,"OpenVino version", ov::get_openvino_version());
 
 	std::unique_ptr<ResultBase> result;
@@ -389,20 +395,20 @@ static void processImageForBackground(
 		// To RGB
 		cv::Mat imageRGB;
 		cv::cvtColor(imageBGR, imageRGB, cv::COLOR_BGR2RGB);
-		if (pipeline->isReadyToProcess()) {
-			auto startTime = std::chrono::steady_clock::now();
+        {
+            ITT_SCOPED_TASK(RunAsyncPipeline)
+            if (pipeline->isReadyToProcess()) {
+                auto startTime = std::chrono::steady_clock::now();
 
-            pipeline->submitData(ImageInputData(imageRGB),
-				std::make_shared<ImageMetaData>(imageRGB, startTime));
+                pipeline->submitData(ImageInputData(imageRGB),
+                    std::make_shared<ImageMetaData>(imageRGB, startTime));
 
-	}
-		else {
-			blog(LOG_INFO, "Pipeline not ready");
-		}
-
-		//pipeline.waitForData();
-
-        pipeline->waitForTotalCompletion();
+            }
+            else {
+                blog(LOG_INFO, "Pipeline not ready");
+            }
+            pipeline->waitForTotalCompletion();
+        }
 		result = pipeline->getResult();
 		if (!result) {
 			blog(LOG_INFO, "is it valid result?");
@@ -454,6 +460,7 @@ static void processImageForBackground(
 
 static struct obs_source_frame* filter_render(void* data, struct obs_source_frame* frame)
 {
+    ITT_SCOPED_TASK(bkg_rm_filter_render);
 	struct background_removal_filter* tf = reinterpret_cast<background_removal_filter*>(data);
 
 	// Convert to BGR

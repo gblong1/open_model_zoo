@@ -19,6 +19,49 @@ option(ENABLE_PYTHON "Whether to build extension modules for Python demos" OFF)
 option(MULTICHANNEL_DEMO_USE_TBB "Use TBB-based threading in multichannel demos" OFF)
 option(MULTICHANNEL_DEMO_USE_NATIVE_CAM "Use native camera api in multichannel demos" OFF)
 option(ENABLE_OBS_PLUGINS "Whether to build OBS (Open Broadcaster Software) plugins" ON)
+option(ENABLE_ITT "Whether to enable support for ITT tracing with VTune" ON)
+
+#whether ITT is enabled or not, include ittutils.
+# This allows the surrounding source file to unconditionally include <ittutils.h>
+# That header file will implement the preprocessor logic to *actually* enable ITT or not.
+include_directories( common/cpp/ittutils )
+
+if( ENABLE_ITT )
+    if( DEFINED ENV{VTUNE_PROFILER_DIR} )
+       file(TO_NATIVE_PATH $ENV{VTUNE_PROFILER_DIR} VTUNE_PROFILER_DIR)
+	   find_path(ITT_INCLUDE_DIR 
+	             NAME ittnotify.h
+				 HINTS ${VTUNE_PROFILER_DIR}/sdk/include
+				 DOC "ITT include directory"
+				 )
+				 
+		if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+		    set(VTUNE_SDK_LIBDIR ${VTUNE_PROFILER_DIR}/sdk/lib64)
+		else()
+		    set(VTUNE_SDK_LIBDIR ${VTUNE_PROFILER_DIR}/sdk/lib32)
+		endif()
+		
+	    find_library(ITTNOTIFY_LIB
+		             NAMES ittnotify libittnotify
+					 HINTS ${VTUNE_SDK_LIBDIR}
+					 DOC "ITTNOTIFY library"
+					 )
+					 
+		if( ITT_INCLUDE_DIR AND ITTNOTIFY_LIB  )
+		    message("ITT Include directies and libraries found. Enabling ITT.")
+		    message("ITT_INCLUDE_DIR = ${ITT_INCLUDE_DIR}")
+		    message("ITTNOTIFY_LIB = ${ITTNOTIFY_LIB}")
+		    set( ITT_LIBS ${ITTNOTIFY_LIB})
+		    include_directories( ${ITT_INCLUDE_DIR})
+			add_definitions(-DITT_ENABLED)
+		else()
+		    message("ITT Include directies and libraries NOT found. ITT will be disabled.")
+		endif()
+    else()
+        message( "VTUNE_PROFILER_DIR is not set. ITT will be disabled.")
+	    return()
+    endif()
+endif()
 
 if(NOT BIN_FOLDER)
     string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} ARCH)
@@ -130,7 +173,7 @@ macro(add_demo)
     endif()
 
     target_link_libraries(${IE_SAMPLE_NAME} PRIVATE ${OpenCV_LIBRARIES} ${InferenceEngine_LIBRARIES}
-                                                    ${IE_SAMPLE_DEPENDENCIES} ngraph::ngraph utils gflags)
+                                                    ${IE_SAMPLE_DEPENDENCIES} ngraph::ngraph utils gflags ${ITT_LIBS})
 
     if(UNIX)
         target_link_libraries(${IE_SAMPLE_NAME} PRIVATE pthread)
