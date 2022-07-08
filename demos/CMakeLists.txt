@@ -59,7 +59,6 @@ if( ENABLE_ITT )
 		endif()
     else()
         message( "VTUNE_PROFILER_DIR is not set. ITT will be disabled.")
-	    return()
     endif()
 endif()
 
