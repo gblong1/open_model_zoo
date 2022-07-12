@@ -359,19 +359,17 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 
 	// Convert to BGR
 	cv::Mat imageBGR = convertFrameToBGR(frame, tf);
-    cv::Mat imageRGB;
-    cv::cvtColor(imageBGR, imageRGB, cv::COLOR_BGR2RGB);
-
+  
     BaseEstimator* estimators[] = { tf->headPoseEstimator.get(),tf->landmarksEstimator.get(), tf->eyeStateEstimator.get(), tf->gazeEstimator.get() };
 
     try {
         
-        auto inferenceResults = tf->faceDetector->detect(imageRGB);
+        auto inferenceResults = tf->faceDetector->detect(imageBGR);
         
         for (auto& inferenceResult : inferenceResults) {
             for (auto estimator : estimators) {
                
-                estimator->estimate(imageRGB, inferenceResult);
+                estimator->estimate(imageBGR, inferenceResult);
             }
         }
 

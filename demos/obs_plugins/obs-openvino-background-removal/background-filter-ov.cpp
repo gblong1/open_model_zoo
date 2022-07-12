@@ -72,6 +72,8 @@ struct background_removal_filter {
 
     std::shared_ptr<AsyncPipeline> pipeline;
 
+    std::shared_ptr<cv::Mat> customImage;
+
 };
 
 
@@ -243,7 +245,13 @@ static void filter_update(void* data, obs_data_t* settings)
 	tf->backgroundColor.val[2] = (double)(color & 0x0000ff);
 
     tf->background_image = obs_data_get_bool(settings, "AddCustomBackground");
-    tf->background_image_path = obs_data_get_string(settings, "CustomImagePath");
+
+    std::string bkg_img_path = obs_data_get_string(settings, "CustomImagePath");
+    if (tf->background_image && (tf->background_image_path != bkg_img_path))
+    {
+        tf->background_image_path = bkg_img_path;
+        tf->customImage = std::make_shared<cv::Mat>(cv::imread(tf->background_image_path));
+    }
 
     tf->blur = obs_data_get_bool(settings, "blur_background");
     tf->blur_value = (int)obs_data_get_int(settings, "blur_background_value");
@@ -404,16 +412,13 @@ static void processImageForBackground(
     }
 
 	try {
-		// To RGB
-		cv::Mat imageRGB;
-		cv::cvtColor(imageBGR, imageRGB, cv::COLOR_BGR2RGB);
         {
             ITT_SCOPED_TASK(RunAsyncPipeline)
             if (pipeline->isReadyToProcess()) {
                 auto startTime = std::chrono::steady_clock::now();
 
-                pipeline->submitData(ImageInputData(imageRGB),
-                    std::make_shared<ImageMetaData>(imageRGB, startTime));
+                pipeline->submitData(ImageInputData(imageBGR),
+                    std::make_shared<ImageMetaData>(imageBGR, startTime));
 
             }
             else {
@@ -431,11 +436,8 @@ static void processImageForBackground(
 
 		cv::Mat outputImage = result->asRef<ImageResult>().resultImage;
 
-
         backgroundMask = outputImage != 15 ; 
 
-
-	
 		// Contour processing
 		if (tf->contourFilter > 0.0 && tf->contourFilter < 1.0) {
 			std::vector<std::vector<cv::Point> > contours;
@@ -527,41 +529,50 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
 			cv::Mat(tmpImage + tmpBackground).convertTo(imageBGR, CV_8UC3);
 		}
 		else {
-		
-            if (tf->blur) {
-                cv::Mat bg;
-                blur(imageBGR, bg, cv::Size(tf->blur_value, tf->blur_value));
-                for (int row = 0; row < backgroundMask.rows; ++row)
-                {
-                    for (int col = 0; col < backgroundMask.cols; ++col) {
 
-                           if (backgroundMask.at<uchar>(row, col)){
-                           
-                              imageBGR.at<cv::Vec3b>(row, col) = bg.at<cv::Vec3b>(row, col);
-                             
-                           }
-                    }
-                }
-            }
-            else if ((tf->background_image) && (!tf->blur))
+            if(tf->background_image || tf->blur)
             {
-                cv::Mat customImage = cv::imread(tf->background_image_path);
-                cv::resize(customImage, customImage, imageBGR.size());
-                for (int row = 0; row < backgroundMask.rows; ++row)
+                if (tf->background_image)
                 {
-                    for (int col = 0; col < backgroundMask.cols; ++col) {
+                    auto bkg_image = tf->customImage;
+                    if (bkg_image)
+                    {
+                        cv::Mat customImage;
+                        cv::resize(*bkg_image, customImage, imageBGR.size());
+                        for (int row = 0; row < backgroundMask.rows; ++row)
+                        {
+                            for (int col = 0; col < backgroundMask.cols; ++col) {
 
-                        if (backgroundMask.at<uchar>(row, col)) {
+                                if (backgroundMask.at<uchar>(row, col)) {
 
-                            imageBGR.at<cv::Vec3b>(row, col) = customImage.at<cv::Vec3b>(row, col);
+                                    imageBGR.at<cv::Vec3b>(row, col) = customImage.at<cv::Vec3b>(row, col);
+                                }
+                            }
                         }
                     }
                 }
 
+                if (tf->blur) {
+                    cv::Mat bg;
+                    blur(imageBGR, bg, cv::Size(tf->blur_value, tf->blur_value));
+                    for (int row = 0; row < backgroundMask.rows; ++row)
+                    {
+                        for (int col = 0; col < backgroundMask.cols; ++col) {
+
+                               if (backgroundMask.at<uchar>(row, col)){
+                           
+                                  imageBGR.at<cv::Vec3b>(row, col) = bg.at<cv::Vec3b>(row, col);
+                             
+                               }
+                        }
+                    }
+                }
 
             }
             else
-			imageBGR.setTo(tf->backgroundColor, backgroundMask);
+            { 
+			    imageBGR.setTo(tf->backgroundColor, backgroundMask);
+            }
 		}
 	}
 	catch (const std::exception& e) {
