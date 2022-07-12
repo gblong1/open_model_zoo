@@ -189,7 +189,19 @@ static obs_properties_t* filter_properties(void* data)
 }
 
 static void filter_defaults(obs_data_t* settings) {
-    obs_data_set_default_string(settings, "modelFilepath", "C:\\Users\\arishaku\\deeplabv3\\FP16\\deeplabv3.xml"); //"C:\\Users\\arishaku\\deeplabv3\\FP16\\deeplabv3.xml" //"D:\\open_model_zoo\\models\\public\\deeplabv3\\FP16\\deeplabv3.xml"
+
+    char* deeplab_path = obs_module_file("deeplabv3/FP16/deeplabv3.xml");
+    if (deeplab_path)
+    {
+        blog(LOG_INFO, "deeplabv3 model found %s", deeplab_path);
+        obs_data_set_default_string(settings, "modelFilepath", deeplab_path);
+    }
+    else
+    {
+        blog(LOG_INFO, "obs_module_file returned NULL");
+        obs_data_set_default_string(settings, "modelFilepath", "C:\\Users\\arishaku\\deeplabv3\\FP16\\deeplabv3.xml");
+    }
+    
 	obs_data_set_default_double(settings, "contour_filter", 0.05);
 	obs_data_set_default_double(settings, "smooth_contour", 0.5);
 	obs_data_set_default_double(settings, "feather", 0.0);
@@ -224,7 +236,7 @@ static void filter_update(void* data, obs_data_t* settings)
 
     tf->modelFilepath = obs_data_get_string(settings, "modelFilepath");
 
-
+ 
 	uint64_t color = obs_data_get_int(settings, "replaceColor");
 	tf->backgroundColor.val[0] = (double)((color >> 16) & 0x0000ff);
 	tf->backgroundColor.val[1] = (double)((color >> 8) & 0x0000ff);

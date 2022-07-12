@@ -5,6 +5,7 @@
 #include <wchar.h>
 #endif
 
+
 #include <numeric>
 #include <memory>
 #include <exception>
@@ -36,13 +37,6 @@
 
 #include "plugin-macros.generated.h"
 
-
-//const char* MODEL_SINET = "SINet_Softmax_simple.onnx";
-//const char* MODEL_MODNET = "modnet_simple.onnx";
-//const char* MODEL_MEDIAPIPE = "mediapipe.onnx";
-//const char* MODEL_SELFIE = "selfie_segmentation.onnx";
-//const char* MODEL_RVM = "rvm_mobilenetv3_fp32.onnx";
-const char* MODEL_DEEPLABV3 = "deeplabv3.xml";
 
 const char* DEVICE_CPU = "CPU";
 const char* DEVICE_VPU = "VPUX";
@@ -81,6 +75,8 @@ struct smart_framing_filter {
     bool bDebug_mode;
     bool bSmoothMode;
 
+    bool bTopThirdCentered;
+
     std::string modelFilepathYolov4S;
     std::string Device_Yolov4;
     std::shared_ptr<cv::GComputation> compute_yolov4;
@@ -115,6 +111,10 @@ static obs_properties_t* filter_properties(void* data)
         "Smooth",
         "Smooth");
 
+    obs_property_t* p_topThirdCentered = obs_properties_add_bool(props,
+        "TopThirdCentered",
+        "Center around top-third of detected person");
+
     obs_property_t* p_sr_enabled = obs_properties_add_bool(props,
         "SuperResolutionEnabled",
         "Enable Super Resolution");
@@ -136,6 +136,7 @@ static obs_properties_t* filter_properties(void* data)
         obs_module_text("Super Resolution Device"),
         OBS_COMBO_TYPE_LIST,
         OBS_COMBO_FORMAT_STRING);
+
 
     obs_property_list_add_string(p_sr_device, obs_module_text("CPU"), DEVICE_CPU);
     obs_property_list_add_string(p_sr_device, obs_module_text("GPU"), DEVICE_GPU);
@@ -164,11 +165,34 @@ static obs_properties_t* filter_properties(void* data)
 static void filter_defaults(obs_data_t* settings) {
     obs_data_set_default_bool(settings, "Debug-Mode", false);
     obs_data_set_default_bool(settings, "Smooth", true);
+    obs_data_set_default_bool(settings, "TopThirdCentered", false);
     obs_data_set_default_bool(settings, "SuperResolutionEnabled", false);
 	obs_data_set_default_string(settings, "Yolov4TinyDevice", DEVICE_CPU);
     obs_data_set_default_string(settings, "SuperResolutionDevice", DEVICE_CPU);
-    obs_data_set_default_string(settings, "Yolov4TinyModelPath", "D:\\clientmodels\\BDK4\\yolo-v4-tiny\\tf\\FP16-INT8\\yolo-v4-tiny.xml");
-    obs_data_set_default_string(settings, "SuperResolutionModelPath", "D:\\Ryan\\open_model_zoo\\demos\\image_processing_demo\\cpp\\intel\\single-image-super-resolution-1032\\FP16\\single-image-super-resolution-1032.xml");
+    char* tyv4_path = obs_module_file("yolo-v4-tiny/tf/FP16-INT8/yolo-v4-tiny.xml");
+    if (tyv4_path)
+    {
+        blog(LOG_INFO, "Tiny Yolov4 model found %s", tyv4_path);
+        obs_data_set_default_string(settings, "Yolov4TinyModelPath", tyv4_path);
+    }
+    else
+    {
+        blog(LOG_INFO, "obs_module_file returned NULL");
+        obs_data_set_default_string(settings, "Yolov4TinyModelPath", "D:\\clientmodels\\BDK4\\yolo-v4-tiny\\tf\\FP16-INT8\\yolo-v4-tiny.xml");
+    }
+
+    char* super_res_path = obs_module_file("single-image-super-resolution-1032/FP16/single-image-super-resolution-1032.xml");
+    if (super_res_path)
+    {
+        blog(LOG_INFO, "Super Resolution model found %s", super_res_path);
+        obs_data_set_default_string(settings, "SuperResolutionModelPath", super_res_path);
+    }
+    else
+    {
+        blog(LOG_INFO, "obs_module_file returned NULL");
+        obs_data_set_default_string(settings, "SuperResolutionModelPath", "D:\\Ryan\\open_model_zoo\\demos\\image_processing_demo\\cpp\\intel\\single-image-super-resolution-1032\\FP16\\single-image-super-resolution-1032.xml");
+    }
+
 }
 
 
@@ -233,6 +257,7 @@ static void filter_update(void* data, obs_data_t* settings)
 
     tf->bDebug_mode = obs_data_get_bool(settings, "Debug-Mode");
     tf->bSmoothMode = obs_data_get_bool(settings, "Smooth");
+    tf->bTopThirdCentered = obs_data_get_bool(settings, "TopThirdCentered");
 
     bool bCurrentSuperResolutionEnabled = obs_data_get_bool(settings, "SuperResolutionEnabled");
  
@@ -422,6 +447,8 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
             }
         }
 
+        
+
         //if our ROI list contains at least 30 frames OR we did not find a person
         // TODO: Make '30' here, configurable. 
         if (tf->roi_list.size() >= 30 || init_rect.empty())
@@ -473,6 +500,19 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
         {
             the_roi = init_rect;
         }
+
+        if (tf->bTopThirdCentered)
+        {
+            //int top_third_height = the_roi.height / 3;
+            the_roi.height = the_roi.width;
+            the_roi.y -= the_roi.width/3;
+            if (the_roi.y < 0)
+            {
+                the_roi.y = 0;
+            }
+        }
+
+        
 
         //calculate cropped region, and perform crop + resize
         {

@@ -55,11 +55,6 @@ const char* DEVICE_GPU = "GPU";
 using namespace gaze_estimation;
 
 InferenceEngine::Core core;
-const std::string modelFilepath = "E:\\open_model_zoo\\models\\intel\\gaze-estimation-adas-0002\\FP16-INT8\\gaze-estimation-adas-0002.xml"; //TODO: figure out best way to call model file path 
-const std::string m_fd = "E:\\open_model_zoo\\models\\intel\\face-detection-retail-0004\\FP16-INT8\\face-detection-retail-0004.xml";
-const std::string m_hp = "E:\\open_model_zoo\\models\\intel\\head-pose-estimation-adas-0001\\FP16-INT8\\head-pose-estimation-adas-0001.xml";
-const std::string m_lm = "E:\\open_model_zoo\\models\\intel\\facial-landmarks-35-adas-0002\\FP16-INT8\\facial-landmarks-35-adas-0002.xml";
-const std::string m_es = "E:\\open_model_zoo\\models\\public\\open-closed-eye-0001\\FP16\\open-closed-eye-0001.xml";
 
 struct gaze_correction_filter {
 	
@@ -202,6 +197,42 @@ static void filter_update(void* data, obs_data_t* settings)
 
 	const std::string current_device = obs_data_get_string(settings, "Device");
     tf->Device = current_device;
+
+    std::string modelFilepath = "E:\\open_model_zoo\\models\\intel\\gaze-estimation-adas-0002\\FP16-INT8\\gaze-estimation-adas-0002.xml"; //TODO: figure out best way to call model file path 
+    std::string m_fd = "E:\\open_model_zoo\\models\\intel\\face-detection-retail-0004\\FP16-INT8\\face-detection-retail-0004.xml";
+    std::string m_hp = "E:\\open_model_zoo\\models\\intel\\head-pose-estimation-adas-0001\\FP16-INT8\\head-pose-estimation-adas-0001.xml";
+    std::string m_lm = "E:\\open_model_zoo\\models\\intel\\facial-landmarks-35-adas-0002\\FP16-INT8\\facial-landmarks-35-adas-0002.xml";
+    std::string m_es = "E:\\open_model_zoo\\models\\public\\open-closed-eye-0001\\FP16\\open-closed-eye-0001.xml";
+
+    char* ge_model_path = obs_module_file("gaze-estimation-adas-0002/FP16-INT8/gaze-estimation-adas-0002.xml");
+    if (ge_model_path)
+    {
+        modelFilepath = ge_model_path;
+    }
+
+    char* fd_model_path = obs_module_file("face-detection-retail-0004/FP16-INT8/face-detection-retail-0004.xml");
+    if (fd_model_path)
+    {
+        m_fd = fd_model_path;
+    }
+
+    char* hp_model_path = obs_module_file("head-pose-estimation-adas-0001/FP16-INT8/head-pose-estimation-adas-0001.xml");
+    if (hp_model_path)
+    {
+        m_hp = hp_model_path;
+    }
+
+    char* lm_model_path = obs_module_file("facial-landmarks-35-adas-0002/FP16-INT8/facial-landmarks-35-adas-0002.xml");
+    if (lm_model_path)
+    {
+        m_lm = lm_model_path;
+    }
+
+    char* es_model_path = obs_module_file("open-closed-eye-0001/FP16/open-closed-eye-0001.xml");
+    if (es_model_path)
+    {
+        m_es = es_model_path;
+    }
 
     try {
         // Set up face detector and estimators
