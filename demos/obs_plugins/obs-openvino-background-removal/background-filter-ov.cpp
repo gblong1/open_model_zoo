@@ -35,10 +35,6 @@
 //const char* MODEL_RVM = "rvm_mobilenetv3_fp32.onnx";
 const char* MODEL_DEEPLABV3 = "deeplabv3.xml";
 
-const char* DEVICE_CPU = "CPU";
-const char* DEVICE_VPU = "VPUX";
-const char* DEVICE_GPU = "GPU";
-
 InferenceEngine::Core core;
 //const std::string modelFilepath = "D:\\open_model_zoo\\models\\public\\deeplabv3\\FP16\\deeplabv3.xml";
 
@@ -70,6 +66,8 @@ struct background_removal_filter {
 	int maskEveryXFrames = 1;
 	int maskEveryXFramesCount = 0;
 
+    std::vector<std::string> ov_available_devices;
+
     std::shared_ptr<AsyncPipeline> pipeline;
 
     std::shared_ptr<cv::Mat> customImage;
@@ -88,6 +86,8 @@ static const char* filter_getname(void* unused)
 
 static obs_properties_t* filter_properties(void* data)
 {
+    struct background_removal_filter* tf = reinterpret_cast<background_removal_filter*>(data);
+
 	obs_properties_t* props = obs_properties_create();
 
     obs_property_t* p_model_path = obs_properties_add_path(
@@ -154,8 +154,6 @@ static obs_properties_t* filter_properties(void* data)
         41,
         2);
 
-
-
 	obs_property_t* p_inf_device = obs_properties_add_list(
 		props,
 		"Device",
@@ -163,18 +161,17 @@ static obs_properties_t* filter_properties(void* data)
 		OBS_COMBO_TYPE_LIST,
 		OBS_COMBO_FORMAT_STRING);
 
-	obs_property_list_add_string(p_inf_device, obs_module_text("CPU"), DEVICE_CPU);
-	obs_property_list_add_string(p_inf_device, obs_module_text("GPU"), DEVICE_GPU);
-	obs_property_list_add_string(p_inf_device, obs_module_text("VPU"), DEVICE_VPU);
-
-
+    for (auto device : tf->ov_available_devices)
+    {
+        obs_property_list_add_string(p_inf_device, obs_module_text(device.c_str()), device.c_str());
+    }
+	
 	obs_property_t* p_model_select = obs_properties_add_list(
 		props,
 		"model_select",
 		obs_module_text("Segmentation model"),
 		OBS_COMBO_TYPE_LIST,
 		OBS_COMBO_FORMAT_STRING);
-
 
 	obs_property_list_add_string(p_model_select, obs_module_text("Deeplabv3"), MODEL_DEEPLABV3);
 
@@ -212,7 +209,7 @@ static void filter_defaults(obs_data_t* settings) {
     obs_data_set_default_string(settings, "CustomImagePath", "");
     obs_data_set_default_bool(settings, "blur_background", false);
     obs_data_set_default_int(settings, "blur_background_value", 21);
-	obs_data_set_default_string(settings, "Device", DEVICE_CPU);
+	obs_data_set_default_string(settings, "Device", "CPU");
 	obs_data_set_default_string(settings, "model_select", MODEL_DEEPLABV3);
 	obs_data_set_default_int(settings, "mask_every_x_frames", 1);
 
@@ -238,7 +235,7 @@ static void filter_update(void* data, obs_data_t* settings)
 
     tf->modelFilepath = obs_data_get_string(settings, "modelFilepath");
 
- 
+
 	uint64_t color = obs_data_get_int(settings, "replaceColor");
 	tf->backgroundColor.val[0] = (double)((color >> 16) & 0x0000ff);
 	tf->backgroundColor.val[1] = (double)((color >> 8) & 0x0000ff);
@@ -310,11 +307,16 @@ static void* filter_create(obs_data_t* settings, obs_source_t* source)
 
 	tf->modelSelection = MODEL_DEEPLABV3;
 
-   
-    filter_update(tf, settings);
-   
-   
+    tf->ov_available_devices = core.GetAvailableDevices();
+    if (tf->ov_available_devices.empty())
+    {
+        blog(LOG_INFO, "No available OpenVINO devices found.");
+        delete tf;
+        return NULL;
+    }
 
+    filter_update(tf, settings);
+ 
 	return tf;
 }
 

@@ -37,11 +37,6 @@
 
 #include "plugin-macros.generated.h"
 
-
-const char* DEVICE_CPU = "CPU";
-const char* DEVICE_VPU = "VPUX";
-const char* DEVICE_GPU = "GPU";
-
 namespace util {
 
     static cv::gapi::GKernelPackage getKernelPackage(const std::string& type) {
@@ -88,6 +83,8 @@ struct smart_framing_filter {
     std::shared_ptr<cv::GComputation> compute_sr;
     cv::gapi::GNetPackage sr_networks;
     cv::gapi::GKernelPackage sr_kernels;
+
+    std::vector<std::string> ov_available_devices;
 };
 
 static const char* filter_getname(void* unused)
@@ -101,6 +98,8 @@ static const char* filter_getname(void* unused)
 
 static obs_properties_t* filter_properties(void* data)
 {
+    struct smart_framing_filter* tf = reinterpret_cast<smart_framing_filter*>(data);
+
 	obs_properties_t* props = obs_properties_create();
 
     obs_property_t* p_debug = obs_properties_add_bool(props,
@@ -126,9 +125,10 @@ static obs_properties_t* filter_properties(void* data)
 		OBS_COMBO_TYPE_LIST,
 		OBS_COMBO_FORMAT_STRING);
 
-	obs_property_list_add_string(p_yolov4_inf_device, obs_module_text("CPU"), DEVICE_CPU);
-	obs_property_list_add_string(p_yolov4_inf_device, obs_module_text("GPU"), DEVICE_GPU);
-	obs_property_list_add_string(p_yolov4_inf_device, obs_module_text("VPU"), DEVICE_VPU);
+    for (auto device : tf->ov_available_devices)
+    {
+        obs_property_list_add_string(p_yolov4_inf_device, obs_module_text(device.c_str()), device.c_str());
+    }
 
     obs_property_t* p_sr_device = obs_properties_add_list(
         props,
@@ -137,10 +137,10 @@ static obs_properties_t* filter_properties(void* data)
         OBS_COMBO_TYPE_LIST,
         OBS_COMBO_FORMAT_STRING);
 
-
-    obs_property_list_add_string(p_sr_device, obs_module_text("CPU"), DEVICE_CPU);
-    obs_property_list_add_string(p_sr_device, obs_module_text("GPU"), DEVICE_GPU);
-    obs_property_list_add_string(p_sr_device, obs_module_text("VPU"), DEVICE_VPU);
+    for (auto device : tf->ov_available_devices)
+    {
+        obs_property_list_add_string(p_sr_device, obs_module_text(device.c_str()), device.c_str());
+    }
 
     obs_property_t* p_yv4_model_path = obs_properties_add_path(
         props,
@@ -167,8 +167,8 @@ static void filter_defaults(obs_data_t* settings) {
     obs_data_set_default_bool(settings, "Smooth", true);
     obs_data_set_default_bool(settings, "TopThirdCentered", false);
     obs_data_set_default_bool(settings, "SuperResolutionEnabled", false);
-	obs_data_set_default_string(settings, "Yolov4TinyDevice", DEVICE_CPU);
-    obs_data_set_default_string(settings, "SuperResolutionDevice", DEVICE_CPU);
+	obs_data_set_default_string(settings, "Yolov4TinyDevice", "CPU");
+    obs_data_set_default_string(settings, "SuperResolutionDevice", "CPU");
     char* tyv4_path = obs_module_file("yolo-v4-tiny/tf/FP16-INT8/yolo-v4-tiny.xml");
     if (tyv4_path)
     {
@@ -333,6 +333,16 @@ static void filter_update(void* data, obs_data_t* settings)
 static void* filter_create(obs_data_t* settings, obs_source_t* source)
 {
     smart_framing_filter* tf = new smart_framing_filter;
+
+    InferenceEngine::Core core;
+    tf->ov_available_devices = core.GetAvailableDevices();
+    if (tf->ov_available_devices.empty())
+    {
+        blog(LOG_INFO, "No available OpenVINO devices found.");
+        delete tf;
+        return NULL;
+    }
+
 
     /** Configure networks **/
 	filter_update(tf, settings);

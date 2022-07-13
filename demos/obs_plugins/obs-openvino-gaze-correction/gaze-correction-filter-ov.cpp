@@ -48,10 +48,6 @@ const char* MODEL_HEADPOSE = "head-pose-estimation-adas-0001.xml";
 const char* MODEL_EYESTATE = "open-closed-eye-0001.xml";
 const char* MODEL_GAZESTIMATION = "gaze-estimation-adas-0002.xml";
 
-const char* DEVICE_CPU = "CPU";
-const char* DEVICE_VPU = "VPUX";
-const char* DEVICE_GPU = "GPU";
-
 using namespace gaze_estimation;
 
 InferenceEngine::Core core;
@@ -87,7 +83,7 @@ struct gaze_correction_filter {
 	video_scaler_t* scalerFromBGR = nullptr;
 	std::uint32_t nireq = 0;
 	
-
+    std::vector<std::string> ov_available_devices;
     //std::vector<FaceInferenceResults> inferenceResults;
    
 
@@ -105,6 +101,7 @@ static const char* filter_getname(void* unused)
 
 static obs_properties_t* filter_properties(void* data)
 {
+    struct gaze_correction_filter* tf = reinterpret_cast<gaze_correction_filter*>(data);
 	obs_properties_t* props = obs_properties_create();
 
     obs_property_t* p_model_path = obs_properties_add_path(
@@ -140,7 +137,6 @@ static obs_properties_t* filter_properties(void* data)
         obs_module_text("Gaze Vector"));
 
 
-
 	obs_property_t* p_inf_device = obs_properties_add_list(
 		props,
 		"Device",
@@ -148,12 +144,10 @@ static obs_properties_t* filter_properties(void* data)
 		OBS_COMBO_TYPE_LIST,
 		OBS_COMBO_FORMAT_STRING);
 
-	obs_property_list_add_string(p_inf_device, obs_module_text("CPU"), DEVICE_CPU);
-	obs_property_list_add_string(p_inf_device, obs_module_text("GPU"), DEVICE_GPU);
-	obs_property_list_add_string(p_inf_device, obs_module_text("VPU"), DEVICE_VPU);
-
-
-
+    for (auto device : tf->ov_available_devices)
+    {
+        obs_property_list_add_string(p_inf_device, obs_module_text(device.c_str()), device.c_str());
+    }
 
 	UNUSED_PARAMETER(data);
 	return props;
@@ -166,12 +160,7 @@ static void filter_defaults(obs_data_t* settings) {
     obs_data_set_default_bool(settings, "FacialLandmarks", false);
     obs_data_set_default_bool(settings, "EyeState", true);
     obs_data_set_default_bool(settings, "GazeVector", true);
-
-
-	obs_data_set_default_string(settings, "Device", DEVICE_CPU);
-	
-
-
+	obs_data_set_default_string(settings, "Device", "CPU");
 }
 
 static void destroyScalers(struct gaze_correction_filter* tf) {
@@ -270,14 +259,15 @@ static void* filter_create(obs_data_t* settings, obs_source_t* source)
 {
     gaze_correction_filter* tf = new gaze_correction_filter;
 
+    tf->ov_available_devices = core.GetAvailableDevices();
+    if (tf->ov_available_devices.empty())
+    {
+        blog(LOG_INFO, "No available OpenVINO devices found.");
+        delete tf;
+        return NULL;
+    }
 
-	std::string instanceName{ "obs-gaze-correction-ov" };
-
-
-   
     filter_update(tf, settings);
-   
-   
 
 	return tf;
 }
