@@ -45,7 +45,6 @@ struct background_removal_filter {
 	cv::Scalar backgroundColor{ 0, 0, 0 };
     int blur_value;
     bool blur;
-	float contourFilter = 0.05f;
 	float smoothContour = 0.5f;
 	float feather = 0.0f;
     bool background_image;
@@ -97,15 +96,6 @@ static obs_properties_t* filter_properties(void* data)
         OBS_PATH_FILE,
         ("*.xml"),
         "");
-
-
-	obs_property_t* p_contour_filter = obs_properties_add_float_slider(
-		props,
-		"contour_filter",
-		obs_module_text("Contour Filter (% of image)"),
-		0.0,
-		1.0,
-		0.025);
 
 	obs_property_t* p_smooth_contour = obs_properties_add_float_slider(
 		props,
@@ -201,7 +191,6 @@ static void filter_defaults(obs_data_t* settings) {
         obs_data_set_default_string(settings, "modelFilepath", "C:\\Users\\arishaku\\deeplabv3\\FP16\\deeplabv3.xml");
     }
     
-	obs_data_set_default_double(settings, "contour_filter", 0.05);
 	obs_data_set_default_double(settings, "smooth_contour", 0.5);
 	obs_data_set_default_double(settings, "feather", 0.0);
 	obs_data_set_default_int(settings, "replaceColor", 0x000000);
@@ -253,7 +242,6 @@ static void filter_update(void* data, obs_data_t* settings)
     tf->blur = obs_data_get_bool(settings, "blur_background");
     tf->blur_value = (int)obs_data_get_int(settings, "blur_background_value");
 
-	tf->contourFilter = (float)obs_data_get_double(settings, "contour_filter");
 	tf->smoothContour = (float)obs_data_get_double(settings, "smooth_contour");
 	tf->feather = (float)obs_data_get_double(settings, "feather");
 	tf->maskEveryXFrames = (int)obs_data_get_int(settings, "mask_every_x_frames");
@@ -439,21 +427,6 @@ static void processImageForBackground(
 		cv::Mat outputImage = result->asRef<ImageResult>().resultImage;
 
         backgroundMask = outputImage != 15 ; 
-
-		// Contour processing
-		if (tf->contourFilter > 0.0 && tf->contourFilter < 1.0) {
-			std::vector<std::vector<cv::Point> > contours;
-			findContours(backgroundMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-			std::vector<std::vector<cv::Point> > filteredContours;
-			const int64_t contourSizeThreshold = (int64_t)(backgroundMask.total() * tf->contourFilter);
-			for (auto& contour : contours) {
-				if (cv::contourArea(contour) > contourSizeThreshold) {
-					filteredContours.push_back(contour);
-				}
-			}
-			backgroundMask.setTo(0);
-			drawContours(backgroundMask, filteredContours, -1, cv::Scalar(255), -1);
-		}
 
 		// Resize the size of the mask back to the size of the original input.
 		cv::resize(backgroundMask, backgroundMask, imageBGR.size());
