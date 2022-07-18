@@ -283,6 +283,7 @@ static void showUsage() {
     std::cout << "    -layout                   " << layout_message << std::endl;
     std::cout << "    -cache_dir \"<path>\"        " << cache_dir_message << std::endl;
     std::cout << "    -load_from_file           " << load_from_file_message << std::endl;
+    std::cout << "    -max_ips \"<double>\"     " << max_infer_per_second_message << std::endl;
     std::cout << std::endl << "  device-specific performance options:" << std::endl;
     std::cout << "    -nstreams \"<integer>\"     " << infer_num_streams_message << std::endl;
     std::cout << "    -nthreads \"<integer>\"     " << infer_num_threads_message << std::endl;

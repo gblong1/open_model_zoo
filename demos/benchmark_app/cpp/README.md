@@ -94,7 +94,8 @@ Options:
     -layout                     Optional. Prompts how network layouts should be treated by application. For example, "input1[NCHW],input2[NC]" or "[NCHW]" in case of one input size.
     -cache_dir "<path>"         Optional. Enables caching of loaded models to specified directory.
     -load_from_file             Optional. Loads model from file directly without ReadNetwork.
-
+    -max_ips "<double>"        Optional. Set maximum rate of inference request submission (unit: inference-per-second)
+	 
   CPU-specific performance options:
     -nstreams "<integer>"       Optional. Number of streams to use for inference on the CPU, GPU or MYRIAD devices
                                 (for HETERO and MULTI device cases use format <device1>:<nstreams1>,<device2>:<nstreams2> or just <nstreams>).
@@ -125,6 +126,10 @@ Options:
 ```
 
 Running the application with the empty list of options yields the usage message given above and an error message.
+
+By default, benchmark_app will submit back-to-back inference requests as fast as possible. To set a maximum inference request rate, use -max_ips (for maximum inference-per-second).
+
+For example, -max_ips 30.0 will ensure that there is at least a ~33.33 ms gap between submitted inference requests.
 
 Application supports topologies with one or more inputs. If a topology is not data-sensitive, you can skip the input parameter. In this case, inputs are filled with random values.
 If a model has only image input(s), please provide a folder with images or a path to an image as input.
