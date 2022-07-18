@@ -17,6 +17,35 @@
 #include <vector>
 //#include <vpu/vpu_plugin_config.hpp>
 
+#ifdef _WIN32
+#include <Windows.h>
+
+static NTSTATUS(__stdcall* NtDelayExecution)(BOOL Alertable, PLARGE_INTEGER DelayInterval) = (NTSTATUS(__stdcall*)(BOOL, PLARGE_INTEGER)) GetProcAddress(GetModuleHandle("ntdll.dll"), "NtDelayExecution");
+static NTSTATUS(__stdcall* ZwSetTimerResolution)(IN ULONG RequestedResolution, IN BOOLEAN Set, OUT PULONG ActualResolution) = (NTSTATUS(__stdcall*)(ULONG, BOOLEAN, PULONG)) GetProcAddress(GetModuleHandle("ntdll.dll"), "ZwSetTimerResolution");
+
+static void benchmark_app_sleep(const std::chrono::nanoseconds& sleep_time)
+{
+    static bool is_timer_res_set = false;
+    if (!is_timer_res_set)
+    {
+        ULONG actualResolution;
+        ZwSetTimerResolution(1, true, &actualResolution);
+        is_timer_res_set = false;
+    }
+
+    LARGE_INTEGER interval;
+    interval.QuadPart = -1 * (int)((float)(sleep_time.count() / 100.));
+    NtDelayExecution(false, &interval);
+}
+
+#else
+
+static void benchmark_app_sleep(const std::chrono::nanoseconds& sleep_time)
+{
+    std::this_thread::sleep_for(sleep_time);
+}
+#endif
+
 #include "benchmark_app.hpp"
 #include "infer_request_wrap.hpp"
 #include "inputs_filling.hpp"
@@ -606,10 +635,7 @@ int main(int argc, char* argv[]) {
                 auto time_since_last_inf_submission = std::chrono::duration_cast<ns>(Time::now() - lastInferenceSubmitTime);
                 if (time_since_last_inf_submission < minTimeBetweenInferenceRequests_ns) {
                     auto sleep_time = minTimeBetweenInferenceRequests_ns - time_since_last_inf_submission;
-                    auto start_sleep = Time::now();
-
-                    //busy sleep (note, async sleep methods such as std::this_thread::sleep_for are not accurate enough, especially on Windows)
-                    while ((Time::now() - start_sleep) < sleep_time);
+                    benchmark_app_sleep(sleep_time);
                 }
             }
 
