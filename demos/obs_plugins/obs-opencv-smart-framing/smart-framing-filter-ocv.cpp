@@ -457,8 +457,6 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
             }
         }
 
-        
-
         //if our ROI list contains at least 30 frames OR we did not find a person
         // TODO: Make '30' here, configurable. 
         if (tf->roi_list.size() >= 30 || init_rect.empty())
@@ -555,10 +553,13 @@ static struct obs_source_frame* filter_render(void* data, struct obs_source_fram
                 cv::rectangle(imageBGR, the_roi, cv::Scalar{ 255,0,0 }, 3, cv::LINE_8, 0);
 
                 //Draw detections on original image
+                int person_idx = 0;
                 for (const auto& el : objects) {
-                    //slog::debug << el << slog::endl;
-                    cv::rectangle(imageBGR, el, cv::Scalar{ 0,255,0 }, 2, cv::LINE_8, 0);
-                    cv::putText(imageBGR, el.label, el.tl(), cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0,255,0 }, 2);
+                    if( el.labelID == 0 ) //personId
+                    { 
+                        cv::rectangle(imageBGR, el, cv::Scalar{ 0,255,0 }, 2, cv::LINE_8, 0);
+                        cv::putText(imageBGR, "Person "+ std::to_string(person_idx++), el.tl(), cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0,255,0 }, 2);
+                    }
                 }
             }
             else
