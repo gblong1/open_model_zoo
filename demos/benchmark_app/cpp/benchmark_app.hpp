@@ -130,6 +130,9 @@ static const char cache_dir_message[] = "Optional. Enables caching of loaded mod
 static const char load_from_file_message[] = "Optional. Loads model from file directly without ReadNetwork."
                                              "All CNNNetwork options (like re-shape) will be ignored";
 
+// @brief message for capping rate of inference submission.
+static const char max_infer_per_second_message[] = "Optional. Set maximum rate of inference request submission (unit: inference-per-second)";
+
 // @brief message for quantization bits
 static const char gna_qb_message[] = "Optional. Weight bits for quantization:  8 or 16 (default)";
 
@@ -251,6 +254,8 @@ DEFINE_string(cache_dir, "", cache_dir_message);
 
 /// @brief Define flag for load network from model file by name without ReadNetwork <br>
 DEFINE_bool(load_from_file, false, load_from_file_message);
+
+DEFINE_double(max_ips, 0.0, max_infer_per_second_message);
 
 /**
  * @brief This function show a help message

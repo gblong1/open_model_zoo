@@ -584,6 +584,15 @@ int main(int argc, char* argv[]) {
          * executed in the same conditions **/
         ProgressBar progressBar(progressBarTotalCount, FLAGS_stream_output, FLAGS_progress);
 
+        /** If max_ips is set, calculate the minimum time allowed between inference request submission **/
+        auto minTimeBetweenInferenceRequests_ns = std::chrono::nanoseconds(0);
+        if (FLAGS_max_ips > 0)
+        {
+            minTimeBetweenInferenceRequests_ns = std::chrono::nanoseconds((unsigned long long)(1000000000.0 / FLAGS_max_ips));
+        }
+
+        std::chrono::steady_clock::time_point lastInferenceSubmitTime;
+
         while ((niter != 0LL && iteration < niter) || (duration_nanoseconds != 0LL && (uint64_t)execTime < duration_nanoseconds) ||
                (FLAGS_api == "async" && iteration % nireq != 0)) {
             inferRequest = inferRequestsQueue.getIdleRequest();
@@ -591,6 +600,20 @@ int main(int argc, char* argv[]) {
                 IE_THROW() << "No idle Infer Requests!";
             }
 
+            //starting with the second iteration, (potentially) sleep for some small duration
+            // to cap inference submission rate.
+            if ((FLAGS_max_ips > 0) && (iteration > 0)) {
+                auto time_since_last_inf_submission = std::chrono::duration_cast<ns>(Time::now() - lastInferenceSubmitTime);
+                if (time_since_last_inf_submission < minTimeBetweenInferenceRequests_ns) {
+                    auto sleep_time = minTimeBetweenInferenceRequests_ns - time_since_last_inf_submission;
+                    auto start_sleep = Time::now();
+
+                    //busy sleep (note, async sleep methods such as std::this_thread::sleep_for are not accurate enough, especially on Windows)
+                    while ((Time::now() - start_sleep) < sleep_time);
+                }
+            }
+
+            lastInferenceSubmitTime = Time::now();
             if (FLAGS_api == "sync") {
                 inferRequest->infer();
             } else {
@@ -627,6 +650,8 @@ int main(int argc, char* argv[]) {
         double latency = getMedianValue<double>(inferRequestsQueue.getLatencies());
         double totalDuration = inferRequestsQueue.getDurationInMilliseconds();
         double fps = (FLAGS_api == "sync") ? batchSize * 1000.0 / latency : batchSize * 1000.0 * iteration / totalDuration;
+
+        std::cout << "Inference Requests Per Second: " << iteration * 1000.0 / totalDuration << std::endl;
 
         if (statistics) {
             statistics->addParameters(StatisticsReport::Category::EXECUTION_RESULTS, {
