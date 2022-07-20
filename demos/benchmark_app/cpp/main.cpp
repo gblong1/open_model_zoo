@@ -85,6 +85,10 @@ bool ParseAndCheckCommandLine(int argc, char* argv[]) {
         throw std::logic_error("Incorrect API. Please set -api option to `sync` or `async` value.");
     }
 
+    if (!FLAGS_model_pri.empty() && FLAGS_model_pri != "LOW" && FLAGS_model_pri != "MEDIUM" && FLAGS_model_pri != "HIGH") {
+        throw std::logic_error("Incorrect value passed to -model_pri option. Please set value to 'LOW', 'MEDIUM', or 'HIGH'");
+    }
+
     if (!FLAGS_report_type.empty() && FLAGS_report_type != noCntReport && FLAGS_report_type != averageCntReport && FLAGS_report_type != detailedCntReport) {
         std::string err = "only " + std::string(noCntReport) + "/" + std::string(averageCntReport) + "/" + std::string(detailedCntReport) +
                           " report types are supported (invalid -report_type option value)";
@@ -475,6 +479,30 @@ int main(int argc, char* argv[]) {
         // ----------------- 8. Setting optimal runtime parameters
         // -----------------------------------------------------
         next_step();
+
+        // Model Priority
+        if (!FLAGS_model_pri.empty()) {
+            const char* model_priority_config_value;
+
+            //Note: It's been validated above that FLAGS_model_pri has been set to one of the
+            // 3 supported values.
+            if(FLAGS_model_pri == "HIGH") {
+                model_priority_config_value = CONFIG_VALUE(MODEL_PRIORITY_HIGH);
+            }
+            else if (FLAGS_model_pri == "MEDIUM") {
+                model_priority_config_value = CONFIG_VALUE(MODEL_PRIORITY_MED);
+            }
+            else {
+                model_priority_config_value = CONFIG_VALUE(MODEL_PRIORITY_LOW);
+            }
+
+            try {
+                exeNetwork.SetConfig({ { CONFIG_KEY(MODEL_PRIORITY), model_priority_config_value } });
+            }
+            catch (const std::exception& ex) {
+                slog::warn << "Unable to set MODEL_PRIORITY config to executable network. error:" << ex.what() << slog::endl;
+            }
+        }
 
         // Update number of streams
         for (auto&& ds : device_nstreams) {

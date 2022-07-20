@@ -133,6 +133,9 @@ static const char load_from_file_message[] = "Optional. Loads model from file di
 // @brief message for capping rate of inference submission.
 static const char max_infer_per_second_message[] = "Optional. Set maximum rate of inference request submission (unit: inference-per-second)";
 
+// @brief message for capping rate of inference submission.
+static const char model_pri_message[] = "Optional. Set priority of executable model. Supported values: \"LOW\", \"MEDIUM\", \"HIGH\"";
+
 // @brief message for quantization bits
 static const char gna_qb_message[] = "Optional. Weight bits for quantization:  8 or 16 (default)";
 
@@ -255,7 +258,11 @@ DEFINE_string(cache_dir, "", cache_dir_message);
 /// @brief Define flag for load network from model file by name without ReadNetwork <br>
 DEFINE_bool(load_from_file, false, load_from_file_message);
 
+/// @brief Define parameter for maximum rate of inference request submission <br>
 DEFINE_double(max_ips, 0.0, max_infer_per_second_message);
+
+/// @brief Define parameter for setting priority of model executable
+DEFINE_string(model_pri, "", model_pri_message);
 
 /**
  * @brief This function show a help message
@@ -284,6 +291,7 @@ static void showUsage() {
     std::cout << "    -cache_dir \"<path>\"        " << cache_dir_message << std::endl;
     std::cout << "    -load_from_file           " << load_from_file_message << std::endl;
     std::cout << "    -max_ips \"<double>\"     " << max_infer_per_second_message << std::endl;
+    std::cout << "    -model_pri \"<LOW/MEDIUM/HIGH>\"     " << model_pri_message << std::endl;
     std::cout << std::endl << "  device-specific performance options:" << std::endl;
     std::cout << "    -nstreams \"<integer>\"     " << infer_num_streams_message << std::endl;
     std::cout << "    -nthreads \"<integer>\"     " << infer_num_threads_message << std::endl;
