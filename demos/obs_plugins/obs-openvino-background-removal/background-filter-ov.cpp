@@ -28,26 +28,45 @@
 #include <pipelines/metadata.h>
 #include <models/results.h>
 
-//const char* MODEL_SINET = "SINet_Softmax_simple.onnx";
-//const char* MODEL_MODNET = "modnet_simple.onnx";
-//const char* MODEL_MEDIAPIPE = "mediapipe.onnx";
-//const char* MODEL_SELFIE = "selfie_segmentation.onnx";
-//const char* MODEL_RVM = "rvm_mobilenetv3_fp32.onnx";
-const char* MODEL_DEEPLABV3 = "deeplabv3.xml";
+
+struct ModelDetails
+{
+    std::string data_path; //path to xml
+    InferenceEngine::Precision input_tensor_precision;
+    bool bInputAsBGR; //true means model expects BGR input, false means model expects RGB
+};
+
+const std::map<const std::string, ModelDetails> modelname_to_datapath
+{
+    {
+        "DeepLabv3",
+        {
+            "deeplabv3/FP16/deeplabv3.xml",
+            InferenceEngine::Precision::U8,
+            true
+        }
+    },
+    {
+        "SelfieSegmentation(MediaPipe)",
+        {
+            "mediapipe_self_seg/FP16/mediapipe_selfie_segmentation.xml",
+            InferenceEngine::Precision::FP32,
+            false
+        }
+    }
+};
 
 InferenceEngine::Core core;
-//const std::string modelFilepath = "D:\\open_model_zoo\\models\\public\\deeplabv3\\FP16\\deeplabv3.xml";
-
 
 struct background_removal_filter {
 	
-    std::string modelFilepath;
 	cv::Scalar backgroundColor{ 0, 0, 0 };
     int blur_value;
     bool blur;
 	float smoothContour = 0.5f;
 	float feather = 0.0f;
     bool background_image;
+    bool bConvertToRGB = false;
     std::string background_image_path;
 	std::string Device;
 	std::string modelSelection;
@@ -89,13 +108,17 @@ static obs_properties_t* filter_properties(void* data)
 
 	obs_properties_t* props = obs_properties_create();
 
-    obs_property_t* p_model_path = obs_properties_add_path(
+    obs_property_t* p_model_select = obs_properties_add_list(
         props,
-        "modelFilepath",
-        obs_module_text("Inference Model Path"),
-        OBS_PATH_FILE,
-        ("*.xml"),
-        "");
+        "model_select",
+        obs_module_text("Segmentation model"),
+        OBS_COMBO_TYPE_LIST,
+        OBS_COMBO_FORMAT_STRING);
+
+    for (auto modentry : modelname_to_datapath)
+    {
+        obs_property_list_add_string(p_model_select, obs_module_text(modentry.first.c_str()), modentry.first.c_str());
+    }
 
 	obs_property_t* p_smooth_contour = obs_properties_add_float_slider(
 		props,
@@ -155,15 +178,6 @@ static obs_properties_t* filter_properties(void* data)
     {
         obs_property_list_add_string(p_inf_device, obs_module_text(device.c_str()), device.c_str());
     }
-	
-	obs_property_t* p_model_select = obs_properties_add_list(
-		props,
-		"model_select",
-		obs_module_text("Segmentation model"),
-		OBS_COMBO_TYPE_LIST,
-		OBS_COMBO_FORMAT_STRING);
-
-	obs_property_list_add_string(p_model_select, obs_module_text("Deeplabv3"), MODEL_DEEPLABV3);
 
 	obs_property_t* p_mask_every_x_frames = obs_properties_add_int(
 		props,
@@ -178,19 +192,6 @@ static obs_properties_t* filter_properties(void* data)
 }
 
 static void filter_defaults(obs_data_t* settings) {
-
-    char* deeplab_path = obs_module_file("deeplabv3/FP16/deeplabv3.xml");
-    if (deeplab_path)
-    {
-        blog(LOG_INFO, "deeplabv3 model found %s", deeplab_path);
-        obs_data_set_default_string(settings, "modelFilepath", deeplab_path);
-    }
-    else
-    {
-        blog(LOG_INFO, "obs_module_file returned NULL");
-        obs_data_set_default_string(settings, "modelFilepath", "C:\\Users\\arishaku\\deeplabv3\\FP16\\deeplabv3.xml");
-    }
-    
 	obs_data_set_default_double(settings, "smooth_contour", 0.5);
 	obs_data_set_default_double(settings, "feather", 0.0);
 	obs_data_set_default_int(settings, "replaceColor", 0x000000);
@@ -199,7 +200,8 @@ static void filter_defaults(obs_data_t* settings) {
     obs_data_set_default_bool(settings, "blur_background", false);
     obs_data_set_default_int(settings, "blur_background_value", 21);
 	obs_data_set_default_string(settings, "Device", "CPU");
-	obs_data_set_default_string(settings, "model_select", MODEL_DEEPLABV3);
+	obs_data_set_default_string(settings, "model_select",
+        modelname_to_datapath.begin()->first.c_str());
 	obs_data_set_default_int(settings, "mask_every_x_frames", 1);
 
 }
@@ -219,11 +221,7 @@ static void destroyScalers(struct background_removal_filter* tf) {
 
 static void filter_update(void* data, obs_data_t* settings)
 {
-    
 	struct background_removal_filter* tf = reinterpret_cast<background_removal_filter*>(data);
-
-    tf->modelFilepath = obs_data_get_string(settings, "modelFilepath");
-
 
 	uint64_t color = obs_data_get_int(settings, "replaceColor");
 	tf->backgroundColor.val[0] = (double)((color >> 16) & 0x0000ff);
@@ -247,38 +245,40 @@ static void filter_update(void* data, obs_data_t* settings)
 	tf->maskEveryXFrames = (int)obs_data_get_int(settings, "mask_every_x_frames");
 	tf->maskEveryXFramesCount = (int)(0);
 
-
 	const std::string current_device = obs_data_get_string(settings, "Device");
 	const std::string newModel = obs_data_get_string(settings, "model_select");
 
-	if (tf->modelSelection.empty() ||
-		tf->modelSelection != newModel)
-	{
-		// Re-initialize model if it's not already the selected one or switching inference device
-		tf->modelSelection = newModel;
-		//tf->Device = newUseGpu;
-		destroyScalers(tf);
+    if (!tf->pipeline || (tf->Device != current_device) || (tf->modelSelection != newModel))
+    {
+        destroyScalers(tf);
+        tf->Device = current_device;
+        tf->modelSelection = newModel;
+        
+        ModelDetails details = modelname_to_datapath.at(newModel);
+        char* model_file_path = obs_module_file(details.data_path.c_str());
 
+        tf->bConvertToRGB = !details.bInputAsBGR;
 
-	}
-
-    try {
-        if (!tf->pipeline || (tf->Device != current_device))
+        if (model_file_path)
         {
-            ITT_SCOPED_TASK(bkg_rm_create_async_pipeline)
-            tf->Device = current_device;
-            blog(LOG_INFO, "updating pipeline to use %s", tf->Device.c_str());
-            tf->pipeline = std::make_shared<AsyncPipeline>(std::unique_ptr<SegmentationModel>(new SegmentationModel(tf->modelFilepath, false)),
-                ConfigFactory::getUserConfig(tf->Device, "", "", false, 1, "", 0),
-                core);
+            //create the pipeline
+            try {
+                ITT_SCOPED_TASK(bkg_rm_create_async_pipeline)
+                    blog(LOG_INFO, "updating pipeline to use model=%s, running on device=%s", details.data_path, tf->Device.c_str());
+                tf->pipeline = std::make_shared<AsyncPipeline>(std::unique_ptr<SegmentationModel>(new SegmentationModel(model_file_path, false, details.input_tensor_precision)),
+                    ConfigFactory::getUserConfig(tf->Device, "", "", false, 1, "", 0),
+                    core);
+            }
+            catch (const std::exception& e) {
+                blog(LOG_ERROR, "%s", e.what());
+                tf->pipeline.reset();
+                return;
+            }
         }
-    }
-
-    catch
-        (const std::exception& e) {
-        blog(LOG_ERROR, "%s", e.what());
-        tf->pipeline.reset();
-        return;
+        else
+        {
+            blog(LOG_ERROR, "Unable to find model file, %s, in obs-studio plugin module directory", details.data_path);
+        }  
     }
 }
 
@@ -292,13 +292,10 @@ static void* filter_create(obs_data_t* settings, obs_source_t* source)
 
 	std::string instanceName{ "background-removal-inference-ov" };
 	
-
-	tf->modelSelection = MODEL_DEEPLABV3;
-
     tf->ov_available_devices = core.GetAvailableDevices();
     if (tf->ov_available_devices.empty())
     {
-        blog(LOG_INFO, "No available OpenVINO devices found.");
+        blog(LOG_ERROR, "No available OpenVINO devices found.");
         delete tf;
         return NULL;
     }
@@ -407,8 +404,19 @@ static void processImageForBackground(
             if (pipeline->isReadyToProcess()) {
                 auto startTime = std::chrono::steady_clock::now();
 
-                pipeline->submitData(ImageInputData(imageBGR),
-                    std::make_shared<ImageMetaData>(imageBGR, startTime));
+                if (tf->bConvertToRGB)
+                {
+                    cv::Mat imageRGB;
+                    cv::cvtColor(imageBGR, imageRGB, cv::COLOR_BGR2RGB);
+                    pipeline->submitData(ImageInputData(imageRGB),
+                        std::make_shared<ImageMetaData>(imageRGB, startTime));
+                }
+                else
+                {
+                    pipeline->submitData(ImageInputData(imageBGR),
+                        std::make_shared<ImageMetaData>(imageBGR, startTime));
+                }
+                
 
             }
             else {

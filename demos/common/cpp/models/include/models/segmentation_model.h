@@ -23,7 +23,7 @@ public:
     /// @param modelFileName name of model to load
     /// @param useAutoResize - if true, image will be resized by IE.
     /// Otherwise, image will be preprocessed and resized using OpenCV routines.
-    SegmentationModel(const std::string& modelFileName, bool useAutoResize);
+    SegmentationModel(const std::string& modelFileName, bool useAutoResize, InferenceEngine::Precision ip = InferenceEngine::Precision::U8);
 
     std::shared_ptr<InternalModelData> preprocess(
         const InputData& inputData, InferenceEngine::InferRequest::Ptr& request) override;
@@ -35,4 +35,5 @@ protected:
     int outHeight = 0;
     int outWidth = 0;
     int outChannels = 0;
+    InferenceEngine::Precision input_precision = InferenceEngine::Precision::U8;
 };

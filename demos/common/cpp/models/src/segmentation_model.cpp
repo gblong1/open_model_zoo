@@ -13,14 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 */
-
+#include <math.h>
 #include "models/segmentation_model.h"
 #include "utils/ocv_common.hpp"
 
 using namespace InferenceEngine;
 
-SegmentationModel::SegmentationModel(const std::string& modelFileName, bool useAutoResize) :
-    ImageModel(modelFileName, useAutoResize) {}
+SegmentationModel::SegmentationModel(const std::string& modelFileName, bool useAutoResize, InferenceEngine::Precision ip) :
+    input_precision(ip), ImageModel(modelFileName, useAutoResize) {}
 
 void SegmentationModel::prepareInputsOutputs(InferenceEngine::CNNNetwork& cnnNetwork)
 {
@@ -37,7 +37,7 @@ void SegmentationModel::prepareInputsOutputs(InferenceEngine::CNNNetwork& cnnNet
         throw std::runtime_error("3-channel 4-dimensional model's input is expected");
 
     InputInfo& inputInfo = *cnnNetwork.getInputsInfo().begin()->second;
-    inputInfo.setPrecision(Precision::U8);
+    inputInfo.setPrecision(input_precision);
 
     if (useAutoResize) {
         inputInfo.getPreProcess().setResizeAlgorithm(ResizeAlgorithm::RESIZE_BILINEAR);
@@ -45,6 +45,19 @@ void SegmentationModel::prepareInputsOutputs(InferenceEngine::CNNNetwork& cnnNet
     } else {
         inputInfo.setLayout(Layout::NCHW);
     }
+
+#if 0
+    auto preProcess = inputInfo.getPreProcess();
+    preProcess.init(3);
+    preProcess[0]->meanValue = (0.485f);
+    preProcess[1]->meanValue = (0.456f);
+    preProcess[2]->meanValue = (0.406f);
+    preProcess[0]->stdScale = (0.229f);
+    preProcess[1]->stdScale = (0.224f);
+    preProcess[2]->stdScale = (0.225f);
+    preProcess.setVariant(InferenceEngine::MEAN_VALUE);
+#endif
+
     // --------------------------- Prepare output blobs -----------------------------------------------------
     const OutputsDataMap& outputsDataMap = cnnNetwork.getOutputsInfo();
     if (outputsDataMap.size() != 1) throw std::runtime_error("Demo supports topologies only with 1 output");
@@ -69,6 +82,51 @@ void SegmentationModel::prepareInputsOutputs(InferenceEngine::CNNNetwork& cnnNet
     }
 }
 
+
+void matU8ToNormalized_0_1_FloatBlob(const cv::Mat& orig_image, const InferenceEngine::Blob::Ptr& blob, int batchIndex = 0) {
+    InferenceEngine::SizeVector blobSize = blob->getTensorDesc().getDims();
+
+    const size_t width = blobSize[3];
+    const size_t height = blobSize[2];
+    const size_t channels = blobSize[1];
+
+    if (static_cast<size_t>(orig_image.channels()) != channels) {
+        throw std::runtime_error("The number of channels for net input and image must match");
+    }
+    InferenceEngine::LockedMemory<void> blobMapped = InferenceEngine::as<InferenceEngine::MemoryBlob>(blob)->wmap();
+    float* blob_data = blobMapped.as<float*>();
+
+    cv::Mat resized_image(orig_image);
+    if (static_cast<int>(width) != orig_image.size().width ||
+        static_cast<int>(height) != orig_image.size().height) {
+        cv::resize(orig_image, resized_image, cv::Size(width, height));
+    }
+
+    int batchOffset = batchIndex * width * height * channels;
+
+    if (channels == 1) {
+        for (size_t h = 0; h < height; h++) {
+            for (size_t w = 0; w < width; w++) {
+                blob_data[batchOffset + h * width + w] = ((float)resized_image.at<uchar>(h, w))/255.0f;
+            }
+        }
+    }
+    else if (channels == 3) {  
+        for (size_t c = 0; c < channels; c++) {
+            for (size_t h = 0; h < height; h++) {
+                for (size_t w = 0; w < width; w++) {
+
+                    blob_data[batchOffset + c * width * height + h * width + w] =
+                        ((float)resized_image.at<cv::Vec3b>(h, w)[c]) / 255.0f;
+                }
+            }
+        }
+    }
+    else {
+        throw std::runtime_error("Unsupported number of channels");
+    }
+}
+
 std::shared_ptr<InternalModelData> SegmentationModel::preprocess(const InputData& inputData, InferenceEngine::InferRequest::Ptr& request)
 {
     auto imgData = inputData.asRef<ImageInputData>();
@@ -87,7 +145,15 @@ std::shared_ptr<InternalModelData> SegmentationModel::preprocess(const InputData
     {
         /* Resize and copy data from the image to the input blob */
         Blob::Ptr frameBlob = request->GetBlob(inputsNames[0]);
-        matU8ToBlob<uint8_t>(img, frameBlob);
+        if (input_precision == InferenceEngine::Precision::U8)
+        {
+            matU8ToBlob<uint8_t>(img, frameBlob);
+        }
+        else if (input_precision == InferenceEngine::Precision::FP32)
+        {
+            matU8ToNormalized_0_1_FloatBlob(img, frameBlob);
+        }
+
         resPtr = std::make_shared<InternalImageModelData>(img.cols, img.rows);
     }
 
@@ -109,6 +175,35 @@ std::unique_ptr<ResultBase> SegmentationModel::postprocess(InferenceResult& infR
     {
         cv::Mat predictions(outHeight, outWidth, CV_32SC1, pData);
         predictions.convertTo(result->resultImage, CV_8UC1);
+    }
+    else if (outChannels == 1 && blobPtr->getTensorDesc().getPrecision() == Precision::FP32)
+    {
+        //for (int i = 0; i < 20; i++)
+        //{
+        //    std::cout << "pData[" << i << "] = " << ((float*)pData)[i] << std::endl;
+        //}
+
+        cv::Mat fg_confidence(outHeight, outWidth, CV_32FC1, pData);
+
+        //for (int i = 0; i < 20; i++)
+       // {
+       //     std::cout << "fg_confidence[" << i << "] = " << ((float*)fg_confidence.ptr(0))[i] << std::endl;
+        //}
+
+        fg_confidence.convertTo(result->resultImage, CV_8UC1, 255.0);
+
+        //for (int i = 0; i < 20; i++)
+        //{
+       //     std::cout << "result before thresh[" << i << "] = " << (int)((uchar*)result->resultImage.ptr(0))[i] << std::endl;
+       // }
+
+         result->resultImage = (result->resultImage > 128) & 15;
+
+       // for (int i = 0; i < 20; i++)
+       // {
+       //     std::cout << "result[" << i << "] = " << (int)((uchar*)result->resultImage.ptr(0))[i] << std::endl;
+       // }
+
     }
     else if (blobPtr->getTensorDesc().getPrecision() == Precision::FP32)
     {
