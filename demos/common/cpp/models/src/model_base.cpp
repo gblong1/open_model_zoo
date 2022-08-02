@@ -21,6 +21,19 @@
 
 using namespace InferenceEngine;
 
+void printInputAndOutputsInfo(const InferenceEngine::CNNNetwork& network) {
+    std::cout << "Network inputs:" << std::endl;
+    for (auto&& layer : network.getInputsInfo()) {
+        std::cout << "    " << layer.first << " : " << layer.second->getPrecision() << " / "
+            << layer.second->getLayout() << std::endl;
+    }
+    std::cout << "Network outputs:" << std::endl;
+    for (auto&& layer : network.getOutputsInfo()) {
+        std::cout << "    " << layer.first << " : " << layer.second->getPrecision() << " / "
+            << layer.second->getLayout() << std::endl;
+    }
+}
+
 InferenceEngine::CNNNetwork ModelBase::prepareNetwork(InferenceEngine::Core& core) {
     // --------------------------- Load inference engine ------------------------------------------------
     slog::info << "Loading Inference Engine" << slog::endl;
@@ -43,20 +56,48 @@ InferenceEngine::CNNNetwork ModelBase::prepareNetwork(InferenceEngine::Core& cor
     slog::info << "Loading network files" << slog::endl;
     /** Read network model **/
     InferenceEngine::CNNNetwork cnnNetwork = core.ReadNetwork(modelFileName);
+
+    slog::info << "Info of model read from disk" << slog::endl;
+    printInputAndOutputsInfo(cnnNetwork);
     /** Set batch size to 1 **/
     slog::info << "Batch size is forced to 1." << slog::endl;
     setBatchOne(cnnNetwork);
 
     // -------------------------- Reading all outputs names and customizing I/O blobs (in inherited classes)
     prepareInputsOutputs(cnnNetwork);
+    slog::info << "Info of model after printInputAndOutputsInfo()" << slog::endl;
+    printInputAndOutputsInfo(cnnNetwork);
     return cnnNetwork;
 }
 
+/**
+ * @brief Get extension from filename
+ * @param filename - name of the file which extension should be extracted
+ * @return string with extracted file extension
+ */
+inline std::string fileExt(const std::string& filename) {
+    auto pos = filename.rfind('.');
+    if (pos == std::string::npos)
+        return "";
+    return filename.substr(pos + 1);
+
+}
 ExecutableNetwork ModelBase::loadExecutableNetwork(const CnnConfig& cnnConfig, InferenceEngine::Core& core) {
     this->cnnConfig = cnnConfig;
-    auto cnnNetwork = prepareNetwork(core);
 
-    slog::info << "Loading model to the device" << slog::endl;
-    execNetwork = core.LoadNetwork(cnnNetwork, cnnConfig.devices, cnnConfig.execNetworkConfig);
+    bool isNetworkCompiled = fileExt(modelFileName) == "blob";
+
+    if (!isNetworkCompiled) {
+        auto cnnNetwork = prepareNetwork(core);
+
+        slog::info << "Loading model to the device" << slog::endl;
+        execNetwork = core.LoadNetwork(cnnNetwork, cnnConfig.devices, cnnConfig.execNetworkConfig);
+    }
+    else {
+        execNetwork = core.ImportNetwork(modelFileName, cnnConfig.devices, cnnConfig.execNetworkConfig);
+
+        prepareInputsOutputsPreCompiled();
+    }
+    
     return execNetwork;
 }

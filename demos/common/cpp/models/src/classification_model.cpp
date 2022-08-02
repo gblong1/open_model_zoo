@@ -26,23 +26,44 @@ ClassificationModel::ClassificationModel(const std::string& modelFileName, size_
     labels(labels) {
 }
 
-std::unique_ptr<ResultBase> ClassificationModel::postprocess(InferenceResult& infResult) {
-    InferenceEngine::LockedMemory<const void> outputMapped = infResult.getFirstOutputBlob()->rmap();
-    const float *classificationData = outputMapped.as<float*>();
+template <class T>
+void topResults(size_t nTop, InferenceEngine::MemoryBlob::Ptr memBlob, ClassificationResult* result, const std::vector<std::string> labels)
+{
+    InferenceEngine::LockedMemory<const void> outputMapped = memBlob->rmap();
+    const T* classificationData = outputMapped.as<T*>();
 
-    ClassificationResult* result = new ClassificationResult(infResult.frameId, infResult.metaData);
-    auto retVal = std::unique_ptr<ResultBase>(result);
-
-    std::vector<unsigned> indices(infResult.getFirstOutputBlob()->size());
+    std::vector<unsigned> indices(memBlob->size());
     std::iota(std::begin(indices), std::end(indices), 0);
     std::partial_sort(std::begin(indices), std::begin(indices) + nTop, std::end(indices),
-                    [&classificationData](unsigned l, unsigned r) {
-                        return classificationData[l] > classificationData[r];
-                    });
+        [&classificationData](unsigned l, unsigned r) {
+            return classificationData[l] > classificationData[r];
+        });
     result->topLabels.reserve(nTop);
     for (size_t i = 0; i < nTop; ++i) {
         result->topLabels.emplace_back(indices[i], labels[indices[i]]);
     }
+}
+std::unique_ptr<ResultBase> ClassificationModel::postprocess(InferenceResult& infResult) {
+    ClassificationResult* result = new ClassificationResult(infResult.frameId, infResult.metaData);
+    auto retVal = std::unique_ptr<ResultBase>(result);
+
+    auto memBlob = infResult.getFirstOutputBlob();
+    const auto& blob_precision = memBlob->getTensorDesc().getPrecision();
+
+    switch (blob_precision)
+    {
+        case InferenceEngine::Precision::FP32:
+            topResults<float>(nTop, memBlob, result, labels);
+        break;
+        case InferenceEngine::Precision::FP16:
+            topResults<ov::float16>(nTop, memBlob, result, labels);
+        break;
+
+        default:
+            throw std::runtime_error("Unsupported output precision");
+        break;
+    }
+
     return retVal;
 }
 
@@ -113,4 +134,48 @@ void ClassificationModel::prepareInputsOutputs(InferenceEngine::CNNNetwork& cnnN
         throw std::logic_error("Model's number of classes and parsed labels must match (" + std::to_string(outSizeVector[1]) + " and " + std::to_string(labels.size()) + ')');
 
     data.setPrecision(Precision::FP32);
+}
+
+void ClassificationModel::prepareInputsOutputsPreCompiled() {
+    auto inputInfos = execNetwork.GetInputsInfo();
+    if (inputInfos.size() != 1)
+        throw std::runtime_error("Demo supports topologies only with 1 input");
+
+    auto inputInfoItem = *inputInfos.begin();
+    inputsNames.push_back(inputInfoItem.first);
+
+    const SizeVector& inSizeVector = inputInfoItem.second->getTensorDesc().getDims();
+    if (inSizeVector.size() != 4 || inSizeVector[1] != 3)
+        throw std::runtime_error("3-channel 4-dimensional model's input is expected");
+    if (inSizeVector[2] != inSizeVector[3])
+        throw std::logic_error("Model input has incorrect image shape. Must be NxN square."
+            " Got " + std::to_string(inSizeVector[2]) +
+            "x" + std::to_string(inSizeVector[3]) + ".");
+
+    size_t batchSize = inSizeVector[0];
+    if (batchSize != 1)
+        throw std::logic_error("Model's batch size must be 1");
+
+    if (useAutoResize) {
+        throw std::logic_error("auto-resize is not supported when using pre-compiled models");
+    }
+
+    auto outputsDataMap = execNetwork.GetOutputsInfo();
+    if (outputsDataMap.size() != 1) throw std::runtime_error("Demo supports topologies only with 1 output");
+
+    outputsNames.push_back(outputsDataMap.begin()->first);
+    auto data = *outputsDataMap.begin()->second;
+    const SizeVector& outSizeVector = data.getTensorDesc().getDims();
+    if (outSizeVector.size() != 2 && outSizeVector.size() != 4)
+        throw std::runtime_error("Demo supports topologies only with 2-dimensional or 4-dimensional output");
+    if (outSizeVector.size() == 4 && outSizeVector[2] != 1 && outSizeVector[3] != 1)
+        throw std::runtime_error("Demo supports topologies only with 4-dimensional output which has last two dimensions of size 1");
+    if (nTop > outSizeVector[1])
+        throw std::runtime_error("The model provides " + std::to_string(outSizeVector[1]) + " classes, but " + std::to_string(nTop) + " labels are requested to be predicted");
+    if (outSizeVector[1] == labels.size() + 1) {
+        labels.insert(labels.begin(), "other");
+        slog::warn << "Inserted 'other' label as first.\n";
+    }
+    else if (outSizeVector[1] != labels.size())
+        throw std::logic_error("Model's number of classes and parsed labels must match (" + std::to_string(outSizeVector[1]) + " and " + std::to_string(labels.size()) + ')');
 }

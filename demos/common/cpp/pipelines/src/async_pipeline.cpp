@@ -93,8 +93,10 @@ int64_t AsyncPipeline::submitData(const InputData& inputData, const std::shared_
 
                         if (Precision::I32 == blobPtr->getTensorDesc().getPrecision())
                             result.outputsData.emplace(outName, std::make_shared<TBlob<int>>(*as<TBlob<int>>(blobPtr)));
-                        else
+                        else if (Precision::FP32 == blobPtr->getTensorDesc().getPrecision())
                             result.outputsData.emplace(outName, std::make_shared<TBlob<float>>(*as<TBlob<float>>(blobPtr)));
+                        else if (Precision::FP16 == blobPtr->getTensorDesc().getPrecision())
+                            result.outputsData.emplace(outName, std::make_shared<TBlob<int16_t>>(*as<TBlob<int16_t>>(blobPtr)));
                     }
 
                     completedInferenceResults.emplace(frameID, result);

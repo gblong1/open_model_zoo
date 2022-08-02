@@ -47,6 +47,7 @@ public:
 protected:
     InferenceEngine::CNNNetwork prepareNetwork(InferenceEngine::Core& core);
     virtual void prepareInputsOutputs(InferenceEngine::CNNNetwork& cnnNetwork) = 0;
+    virtual void prepareInputsOutputsPreCompiled() {};
 
     std::vector<std::string> inputsNames;
     std::vector<std::string> outputsNames;
