@@ -25,7 +25,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 
 MODULE_EXPORT const char *obs_module_description(void)
 {
-	return "Smart Framing filter powered by OpenCV & OpenVINO";
+	return "Smart Framing filter powered by OpenVINO";
 }
 
 //extern struct obs_source_info background_removal_filter_info;

@@ -90,7 +90,7 @@ struct smart_framing_filter {
 static const char* filter_getname(void* unused)
 {
 	UNUSED_PARAMETER(unused);
-	return "OpenCV Smart Framing";
+	return "OpenVINO Smart Framing";
 }
 
 
