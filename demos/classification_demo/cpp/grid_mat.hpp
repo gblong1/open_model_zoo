@@ -65,8 +65,10 @@ public:
 
         presenter.drawGraphs(outImg);
 
+#if 0
         metrics.update(lastRequestStartTime, outImg, cv::Point(textPadding, textSize.height + textPadding),
                                   fontType, fontScale, cv::Scalar(255, 100, 100), thickness);
+#endif
 
         if (showAccuracy) {
             cv::putText(outImg,
@@ -97,7 +99,7 @@ public:
             case PredictionResult::Incorrect:
                 textColor = cv::Scalar(50, 50, 255); break;   // red
             case PredictionResult::Unknown:
-                textColor = cv::Scalar(75, 255, 255); break;  // yellow
+                textColor = cv::Scalar(200, 10, 10); break;   // blue
             default:
                 throw std::runtime_error("Undefined type of prediction result");
         }
