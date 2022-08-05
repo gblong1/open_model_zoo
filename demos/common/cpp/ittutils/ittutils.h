@@ -10,7 +10,7 @@
 
 #ifdef ITT_ENABLED
 #include <ittnotify.h>
-__itt_domain* domain = __itt_domain_create("OMZ.ITT.Domain");
+static __itt_domain* domain = __itt_domain_create("OMZ.ITT.Domain");
 
 class ITTScopedTask
 {
