@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="D:\open_model_zoo-pr3421\demos\common\cpp_gapi\utils_gapi\src\stream_source.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="D:\open_model_zoo-pr3421\demos\common\cpp_gapi\utils_gapi\include\utils_gapi\stream_source.hpp">
+      <Filter>include</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\open_model_zoo-pr3421\demos\common\cpp_gapi\utils_gapi\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{D0E53692-2958-34D1-B6F4-4E9663480839}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{7E51FC22-3239-3C01-8746-98FD9EBD6638}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

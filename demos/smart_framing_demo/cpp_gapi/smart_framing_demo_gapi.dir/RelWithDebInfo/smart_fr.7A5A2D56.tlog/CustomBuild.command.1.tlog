@@ -1,0 +1,10 @@
+^D:\OPEN_MODEL_ZOO-PR3421\DEMOS\SMART_FRAMING_DEMO\CPP_GAPI\CMAKELISTS.TXT
+setlocal
+"C:\Program Files (x86)\CMake\bin\cmake.exe" -SD:/open_model_zoo-pr3421/demos -BD:/open_model_zoo-pr3421/demos --check-stamp-file D:/open_model_zoo-pr3421/demos/smart_framing_demo/cpp_gapi/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
