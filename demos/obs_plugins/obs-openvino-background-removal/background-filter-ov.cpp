@@ -264,7 +264,7 @@ static void filter_update(void* data, obs_data_t* settings)
             //create the pipeline
             try {
                 ITT_SCOPED_TASK(bkg_rm_create_async_pipeline)
-                    blog(LOG_INFO, "updating pipeline to use model=%s, running on device=%s", details.data_path, tf->Device.c_str());
+                    blog(LOG_INFO, "updating pipeline to use model=%s, running on device=%s", details.data_path.c_str(), tf->Device.c_str());
                 tf->pipeline = std::make_shared<AsyncPipeline>(std::unique_ptr<SegmentationModel>(new SegmentationModel(model_file_path, false, details.input_tensor_precision)),
                     ConfigFactory::getUserConfig(tf->Device, "", "", false, 1, "", 0),
                     core);
