@@ -277,7 +277,7 @@ static void filter_update(void* data, obs_data_t* settings)
         }
         else
         {
-            blog(LOG_ERROR, "Unable to find model file, %s, in obs-studio plugin module directory", details.data_path);
+            blog(LOG_ERROR, "Unable to find model file, %s, in obs-studio plugin module directory", details.data_path.c_str());
         }  
     }
 }
